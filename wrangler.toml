@@ -1,0 +1,27 @@
+name = "monitor-sefaz"
+main = "src/index.js"
+compatibility_date = "2025-06-01"
+
+# Roda a cada minuto, 24/7
+[triggers]
+crons = ["* * * * *"]
+
+# Estado do monitor (status atual, incidentes, fila de mensagens).
+# O database_id é preenchido pelo "npm run setup".
+[[d1_databases]]
+binding = "DB"
+database_name = "monitor-sefaz"
+database_id = "80414862-ec68-4da4-b18b-8024bce4096d"
+
+[vars]
+# Horas (horário de Brasília) do relatório diário, separadas por vírgula. Ex.: "8,18"
+REPORT_HOURS = "18"
+# Quem é mencionado nas quedas. Use "" para não mencionar ninguém ou "<@&ID_DO_CARGO>" para um cargo.
+MENTION = "@everyone"
+
+# Segredos (não ficam neste arquivo):
+#   npx wrangler secret put DISCORD_WEBHOOK_URL   (obrigatório)
+#   npx wrangler secret put HEALTHCHECK_URL       (opcional, healthchecks.io)
+
+[observability]
+enabled = true

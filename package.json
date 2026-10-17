@@ -1,0 +1,20 @@
+{
+  "name": "monitor-sefaz",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Monitor 24/7 de SEFAZ NF-e/NFC-e e Eveo com alertas no Discord (Cloudflare Workers)",
+  "scripts": {
+    "test": "node test/simulacao.mjs",
+    "test:discord": "node test/enviar-discord.mjs",
+    "build:map": "node scripts/build-map.mjs",
+    "dev": "wrangler dev --test-scheduled --port 8787",
+    "setup": "node scripts/setup.mjs",
+    "deploy": "wrangler deploy",
+    "logs": "wrangler tail"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "wrangler": "^4.0.0"
+  }
+}
