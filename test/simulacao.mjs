@@ -79,6 +79,12 @@ globalThis.fetch = async (input, init = {}) => {
     d.slice(-4).forEach((p) => Object.assign(p, { status: 5, tempo: 32150, erro: 'The operation timed out - URL:https://nfce.svrs.rs.gov.br/ws/NfeAutorizacao/NFeAutorizacao4.asmx' }));
     body = JSON.stringify(d);
   }
+  if (faults.has('nfce_go_intermitente') && url.includes('sefaz_nfce_envio_go&')) {
+    // alterna falha e sucesso: média dos últimos 15 min em laranja/vermelho, sem 3 falhas seguidas
+    const d = JSON.parse(body);
+    d.slice(-4).forEach((p, i) => Object.assign(p, [5, 5, 1, 5][i] === 5 ? { status: 5, erro: 'Service Unavailable (503)' } : { status: 1, erro: '' }));
+    body = JSON.stringify(d);
+  }
   if (faults.has('nfce_go_1falha') && url.includes('sefaz_nfce_envio_go&')) {
     const d = JSON.parse(body);
     d.slice(-1).forEach((p) => Object.assign(p, { status: 5, tempo: 1200, erro: 'Service Unavailable (503)' }));
@@ -136,7 +142,7 @@ async function step(label, f = [], extraEnv = {}, { quiet = false } = {}) {
 const first = await step('1. primeira execução (estado atual real)');
 for (const s of first.state.lastRun.services) {
   console.log(`   fonte ${s.key}: ${s.ok ? 'OK' : 'FALHA ' + s.error} (${s.ms} ms)` +
-    ` | ${s.components.map((c) => `${c.id}=${c.status}${c.unstable ? '~' : ''}${c.unknown ? '?' : ''}`).join(' ')}`);
+    ` | ${s.components.map((c) => `${c.id}=${c.status}${c.problem ? '~' : ''}${c.unknown ? '?' : ''}`).join(' ')}`);
 }
 await step('2. sem mudanças');
 await step('3. MT NFC-e com timeouts + Eveo SP1 fora + MT NF-e vermelho (1ª leitura)', ['nfce_mt', 'eveo_sp1', 'nfe_mt']);
@@ -146,14 +152,14 @@ await step('6. NF-e: 1ª leitura verde');
 await step('7. NF-e: 2ª leitura verde, confirma retorno');
 await step('7b. SVRS NFC-e cai (19 UFs)', ['nfce_svrs']);
 await step('7c. SVRS NFC-e volta');
-const inter = await step('7d. GO NFC-e com 1 falha isolada (intermitente: só mapa, sem alerta)', ['nfce_go_1falha']);
+const inter = await step('7d. GO NFC-e com 1 falha isolada (amarelo/lento como na Tecnospeed, sem alerta)', ['nfce_go_1falha']);
 console.log(`   mapa: GO=${inter.state.lastRun.maps.nfce.GO}`);
 writeFileSync(new URL('./saida/intermitente-nfce.png', import.meta.url), renderMap('nfce', inter.state.lastRun.maps.nfce));
 for (let i = 1; i <= 5; i++) await step(`8.${i} Tecnospeed inacessível`, ['tecnospeed_fora']);
 await step('9. Tecnospeed volta');
-// Intermitência: aviso no 5º minuto, lembrete 30 min depois, normaliza na primeira leitura OK
-for (let i = 1; i <= 36; i++) await step(`11.${i} GO intermitente (minuto ${i})`, ['nfce_go_1falha'], {}, { quiet: true });
-await step('11.37 GO volta ao normal (normaliza na hora)', [], {}, { quiet: true });
+// Instabilidade: aviso no 5º minuto, lembrete 30 min depois, normaliza após 3 min limpos
+for (let i = 1; i <= 36; i++) await step(`11.${i} GO intermitente (minuto ${i})`, ['nfce_go_intermitente'], {}, { quiet: true });
+for (let i = 1; i <= 3; i++) await step(`11.${36 + i} GO normal (minuto ${i} limpo)`, [], {}, { quiet: true });
 // Queda longa: alerta na hora (com menção) e lembrete a cada 30 min (sem menção)
 for (let i = 1; i <= 31; i++) await step(`13.${i} MT NFC-e fora (minuto ${i})`, ['nfce_mt'], {}, { quiet: true });
 await step('13.32 MT NFC-e volta (recuperação na hora)', [], {}, { quiet: true });

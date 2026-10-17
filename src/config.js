@@ -58,23 +58,22 @@ export const NFE_AUTORIZADORES = [
 // As demais (Consulta Cadastro, Recepção Evento...) só aparecem como aviso.
 export const NFE_CORE_COLUMNS = ['autorizacao4', 'retornoautorizacao4', 'statusservico4'];
 
-// Regra de queda/retorno da NFC-e. A Tecnospeed faz um envio de teste por UF a cada ~3 min;
-// status 4 (Timeout > 30s) e 5 (Erro) contam como falha.
+// Regras da NFC-e. A Tecnospeed faz um envio de teste por UF a cada ~3 min, com status
+// 1 Normal, 2 Lento, 3 Muito lento, 4 Timeout, 5 Erro (4 e 5 contam como falha).
+// A cor de cada UF é calculada igual à da Tecnospeed: média dos status dos últimos 15 min, sem as casas decimais
+// (1 verde, 2 amarelo, 3 laranja, 4-5 vermelho).
 export const NFCE_RULE = {
-  windowMin: 10, // janela analisada, contada a partir da medição mais recente
-  minProbes: 2, // mínimo de medições na janela para decidir
-  downRatio: 0.5, // >= 50% das medições com falha...
-  downMinFails: 2, // ...e pelo menos 2 falhas => OFFLINE
-  upRatio: 0.3, // <= 30% de falhas => volta a ONLINE (o SVRS oscila entre 4% e 27% em dia normal)
-  unstableRatio: 0.25, // > 25% com pelo menos 2 falhas, sem chegar a OFFLINE => "com falha" (vermelho no mapa)
-  intermittentRatio: 0.1, // >= 10% de falhas (1 falha isolada já conta numa UF só) => "intermitente" (laranja)
-  slowRatio: 0.3, // >= 30% dos envios "muito lentos" (status 3, > 5s) também conta como intermitente
-  staleMin: 20, // sem medição nova há mais que isso => sem dados (não muda o estado)
+  windowMin: 15, // mesma janela da Tecnospeed
+  downConsecutive: 3, // UF fora do ar: os 3 envios mais recentes falharam
+  upConsecutive: 2, // UF de volta: os 2 envios mais recentes OK
+  downUfShare: 0.5, // autorizador fora do ar: pelo menos metade das UFs dele fora (com uma UF só, ela mesma)
+  staleMin: 20, // sem envio novo há mais que isso => sem dados (não muda o estado)
 };
 
-// Alerta de intermitência (sem menção). Normaliza na primeira leitura OK.
+// Alerta de instabilidade (sem menção): alguma UF do autorizador em laranja ou vermelho.
 export const INTERMITTENT_ALERT = {
-  startMin: 5, // avisa quando o autorizador fica intermitente (ou pior) por 5 min seguidos
+  startMin: 5, // avisa depois de 5 min seguidos instável
+  clearMin: 3, // normaliza depois de 3 min seguidos sem nenhuma UF em laranja/vermelho (evita "normalizar" no meio de uma oscilação)
 };
 
 // Lembrete (sem menção) a cada 30 min enquanto o autorizador continuar fora do ar ou intermitente.

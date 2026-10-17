@@ -67,54 +67,72 @@ function shortError(p) {
   return p.status === 4 ? 'Timeout (> 30s)' : 'Erro';
 }
 
+// Cor da UF pelo nível da Tecnospeed (média truncada dos status dos últimos 15 min).
+const COLOR_BY_LEVEL = { 1: 'ok', 2: 'lento', 3: 'intermitente', 4: 'falha', 5: 'falha' };
+const isFail = (p) => p.status >= 4;
+const fmtAvg = (n) => n.toFixed(2).replace('.', ',');
+
+function nfceUf(uf, raw, now) {
+  const R = NFCE_RULE;
+  const probes = (raw ?? [])
+    .map((p) => ({ uf, t: Date.parse(p.datahora), status: Number(p.status), tempo: Number(p.tempo), erro: p.erro }))
+    .filter((p) => Number.isFinite(p.t) && p.status >= 1)
+    .sort((x, y) => x.t - y.t);
+  const latest = probes.at(-1);
+  if (!latest || now - latest.t > R.staleMin * 60000) return { uf, unknown: true };
+
+  const win = probes.filter((p) => p.t > now - R.windowMin * 60000);
+  if (!win.length) win.push(latest);
+  const avg = win.reduce((s, p) => s + p.status, 0) / win.length;
+  return {
+    uf,
+    avg,
+    level: Math.min(5, Math.max(1, Math.trunc(avg))),
+    win,
+    down: probes.length >= R.downConsecutive && probes.slice(-R.downConsecutive).every(isFail),
+    up: probes.length >= R.upConsecutive && probes.slice(-R.upConsecutive).every((p) => !isFail(p)),
+  };
+}
+
 function nfceGroup(a, byUf, now) {
   const R = NFCE_RULE;
   const base = { id: a.id, name: incidentName(a), label: autorizadorLabel(a) };
-  const probes = a.ufs
-    .flatMap((uf) =>
-      (byUf[uf] ?? []).map((p) => ({
-        uf,
-        t: Date.parse(p.datahora),
-        status: Number(p.status),
-        tempo: Number(p.tempo),
-        erro: p.erro,
-      })),
-    )
-    .filter((p) => Number.isFinite(p.t));
-  if (!probes.length) return { ...base, unknown: true, info: ['sem dados da Tecnospeed'] };
+  const ufs = a.ufs.map((uf) => nfceUf(uf, byUf[uf], now));
+  const known = ufs.filter((u) => !u.unknown);
+  if (!known.length) return { ...base, unknown: true, info: ['sem envios recentes na Tecnospeed'] };
 
-  const last = Math.max(...probes.map((p) => p.t));
-  const ageMin = (now - last) / 60000;
-  if (ageMin > R.staleMin) return { ...base, unknown: true, info: [`sem medição nova há ${Math.round(ageMin)} min`] };
+  // queda: N envios seguidos falhando (no SVRS, em pelo menos metade das UFs); retorno: 2 envios seguidos OK
+  const down = known.filter((u) => u.down);
+  const fail = down.length > 0 && down.length / known.length >= R.downUfShare;
+  const ok = !fail && known.filter((u) => u.up).length / known.length > 1 - R.downUfShare;
+  const problemUfs = known.filter((u) => u.level >= 3);
 
-  const win = probes.filter((p) => p.t > last - R.windowMin * 60000);
-  const fails = win.filter((p) => p.status >= 4);
-  const ratio = win.length ? fails.length / win.length : 0;
-  const enough = win.length >= R.minProbes;
-
+  const win = known.flatMap((u) => u.win);
+  const fails = win.filter(isFail);
   const info = [];
   if (fails.length) {
-    const ufs = [...new Set(fails.map((p) => p.uf))];
+    const fu = [...new Set(fails.map((p) => p.uf))].sort();
     info.push(
       `${fails.length} de ${win.length} envios com falha nos últimos ${R.windowMin} min` +
-        (a.ufs.length > 1 ? ` (${ufs.join(', ')})` : ''),
+        (a.ufs.length > 1 ? ` (${fu.join(', ')})` : ''),
     );
     info.push(`Último erro: ${shortError(fails.reduce((x, y) => (y.t > x.t ? y : x)))}`);
   }
+  if (problemUfs.length) {
+    info.push(`Média 15 min (Tecnospeed): ${problemUfs.map((u) => `${u.uf} ${fmtAvg(u.avg)}`).join(' · ')}`);
+  }
+  if (down.length && a.ufs.length > 1) {
+    info.push(`${down.length} de ${known.length} UFs com ${R.downConsecutive} falhas seguidas: ${down.map((u) => u.uf).join(', ')}`);
+  }
+  const noData = ufs.filter((u) => u.unknown).map((u) => u.uf);
+  if (noData.length) info.push(`Sem envios recentes: ${noData.join(', ')}`);
 
-  const slow = win.filter((p) => p.status === 3).length;
-  if (win.length && slow / win.length >= R.slowRatio) info.push(`${slow} de ${win.length} envios muito lentos (> 5s)`);
-
-  const fail = enough && fails.length >= R.downMinFails && ratio >= R.downRatio;
-  const unstable = !fail && fails.length >= R.downMinFails && ratio > R.unstableRatio;
-  const intermittent =
-    !fail && !unstable && enough && ((fails.length >= 1 && ratio >= R.intermittentRatio) || slow / win.length >= R.slowRatio);
   return {
     ...base,
     fail,
-    ok: enough && ratio <= R.upRatio,
-    unstable,
-    intermittent,
+    ok,
+    problem: !fail && problemUfs.length > 0, // alguma UF em laranja ou vermelho
+    ufColors: Object.fromEntries(known.map((u) => [u.uf, COLOR_BY_LEVEL[u.level]])),
     tempoMs: median(win.map((p) => p.tempo)),
     info,
   };
@@ -216,10 +234,17 @@ export async function checkNfe() {
       if (yellow.length) info.push(`Lento: ${yellow.map((x) => x.title).join(', ')}`);
       if (side.length) info.push(`Outros serviços: ${side.map((x) => `${x.title} ${x.value === 'vermelho' ? '🔴' : '🟡'}`).join(', ')}`);
 
-      // com falha: algum serviço secundário fora; intermitente: serviço principal lento (amarelo secundário é só aviso)
-      const unstable = !red.length && side.some((x) => x.value === 'vermelho');
-      const intermittent = !red.length && !unstable && yellow.length > 0;
-      return { ...base, fail: red.length > 0, ok: !red.length, unstable, intermittent, info };
+      // com falha: serviço principal ou secundário em vermelho; lento: serviço principal em amarelo (amarelo secundário é só aviso)
+      const sideRed = side.some((x) => x.value === 'vermelho');
+      const color = red.length || sideRed ? 'falha' : yellow.length ? 'lento' : 'ok';
+      return {
+        ...base,
+        fail: red.length > 0,
+        ok: !red.length,
+        problem: !red.length && sideRed,
+        ufColors: Object.fromEntries(a.ufs.map((uf) => [uf, color])),
+        info,
+      };
     });
     return { key: 'nfe', ok: true, ms, verificado, components };
   } catch (e) {

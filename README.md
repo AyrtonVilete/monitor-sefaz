@@ -4,7 +4,8 @@ Substitui o bot do Discord que dependia de um computador ligado. Roda como **Clo
 
 - 🔴 **Serviço Fora do Ar** (com `@everyone`) quando um autorizador cai
 - ✅ **Serviço Recuperado** quando volta, com o tempo que ficou fora
-- 🟠 **Instabilidade Detectada** (sem menção) quando um autorizador fica intermitente por 5 min seguidos, e ✅ **Instabilidade Normalizada** assim que ele volta ao normal
+- 🟠 **Instabilidade Detectada** (sem menção) quando alguma UF do autorizador fica laranja/vermelha por 5 min seguidos, e ✅ **Instabilidade Normalizada** depois de 3 min seguidos limpos
+- 🟡 **Recuperação/Normalização Parcial** quando um autorizador volta mas o serviço ainda tem estado com problema (nunca diz "normalizado" com estado em vermelho)
 - 🔴 **Continua Fora do Ar** / 🟠 **Instabilidade Continua** (sem menção): lembrete a cada 30 min enquanto o problema durar (`REMINDER_MIN` em `src/config.js`)
 - 📋 **Relatório de Status** todo dia às 18h (horário de Brasília), com as quedas das últimas 24h
 - ⚠️ **Fonte de Dados Indisponível** se uma fonte ficar 5 min sem responder (o monitor não fica "cego" calado)
@@ -12,15 +13,19 @@ Substitui o bot do Discord que dependia de um computador ligado. Roda como **Clo
 
 ## Mapa
 
-| Cor | Significado |
-|---|---|
-| 🟩 Verde | Normal |
-| 🟧 Laranja | Intermitente: alterna envios normais e falhas (NFC-e: ≥ 10% dos envios em 10 min com falha, ou ≥ 30% muito lentos) ou serviço principal lento no portal (NF-e). Vira o aviso 🟠 Instabilidade (sem menção) após 5 min seguidos (`INTERMITTENT_ALERT` em `src/config.js`) |
-| 🟥 Vermelho | Com falha: NFC-e com mais de 25% dos envios falhando (mínimo de 2 falhas), ou algum serviço fora no portal (NF-e), mas o autorizador ainda não caiu |
-| ⬜ Cinza | Fora do ar: o autorizador da UF está OFFLINE (alerta disparado) |
-| ⬛ Cinza escuro | Sem dados da fonte |
+Na **NFC-e** a cor de cada UF é calculada **igual à da Tecnospeed**: média dos status dos envios da UF nos últimos 15 min, sem as casas decimais (status 1 Normal, 2 Lento, 3 Muito lento, 4 Timeout, 5 Erro).
 
-A cor de cada UF é a do autorizador que a atende (ex.: SVRS fora → as 19 UFs do SVRS ficam cinza na NFC-e).
+| Cor | NFC-e (média 15 min, como na Tecnospeed) | NF-e (portal) |
+|---|---|---|
+| 🟩 Verde | 1 (Normal) | tudo verde |
+| 🟨 Amarelo | 2 (Lento) | serviço principal lento (amarelo) |
+| 🟧 Laranja | 3 (Intermitente) | — |
+| 🟥 Vermelho | 4 ou 5 (Com falha) | algum serviço em vermelho |
+| ⬜ Cinza | Fora do ar: queda confirmada (alerta disparado) | idem |
+| ⬛ Cinza escuro | Sem dados da fonte | idem |
+
+Laranja ou vermelho por 5 min viram o aviso 🟠 Instabilidade, sem menção (`INTERMITTENT_ALERT` em `src/config.js`).
+Na NF-e não há dados por UF: a UF recebe a cor do autorizador que a atende.
 O mapa atual também fica disponível no navegador: `https://<url-do-worker>/mapa/nfce.png` e `/mapa/nfe.png`.
 
 O desenho do mapa (malha oficial do IBGE) é pré-renderizado em `src/map-data.js`; no Worker só a paleta de cores muda, então gerar a imagem custa ~0,05 ms. Só rode `npm run build:map` se quiser mudar o layout em `scripts/build-map.mjs`.
@@ -30,13 +35,13 @@ O desenho do mapa (malha oficial do IBGE) é pré-renderizado em `src/map-data.j
 | Serviço | Fonte | Quando vira OFFLINE |
 |---|---|---|
 | **Eveo (SP1/SP2)** | API pública do status.eveo.com.br (Status.io) | qualquer DC SP1/SP2 diferente de "Operational" |
-| **SEFAZ NFC-e** | Envios de teste da Tecnospeed, por UF, agrupados por autorizador | ≥ 50% dos envios com Timeout/Erro nos últimos 10 min (mínimo de 2 falhas). Volta com ≤ 20% |
+| **SEFAZ NFC-e** | Envios de teste da Tecnospeed, por UF, agrupados por autorizador | os 3 envios mais recentes falharam (Timeout/Erro); no SVRS, em pelo menos metade das UFs. Volta com os 2 envios mais recentes OK |
 | **SEFAZ NF-e** | Portal Nacional da NF-e (disponibilidade) | Autorização4, Retorno Autorização4 ou Status Serviço4 em vermelho por 2 leituras seguidas |
 
 Autorizadores de NFC-e: AM, GO, MG, MS, MT, PR, RS, SP e SVRS (AC, AL, AP, BA, CE, DF, ES, MA, PA, PB, PE, PI, RJ, RN, RO, RR, SC, SE, TO).
 Autorizadores de NF-e: AM, BA, GO, MG, MS, MT, PE, PR, RS, SP, SVAN (MA) e SVRS (16 UFs).
 
-> A regra de NFC-e foi calibrada com dados reais. Alertar a cada falha isolada geraria ~5 alertas a cada 2h só no RJ; com a regra atual, só degradações de verdade disparam alerta.
+> A regra de NFC-e foi calibrada com dados reais e com a fórmula da própria Tecnospeed (25 de 27 UFs batem exatamente; as outras diferem só pelo segundo da leitura). Uma falha isolada não derruba nem dispara alerta.
 
 ## Instalação (uma vez, ~10 min)
 

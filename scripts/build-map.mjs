@@ -17,6 +17,7 @@ const COD = {
 export const UFS = Object.values(COD).sort();
 const LEGEND = [
   ['lg_ok', 'Normal'],
+  ['lg_lento', 'Lento'],
   ['lg_intermitente', 'Intermitente'],
   ['lg_falha', 'Com falha'],
   ['lg_fora', 'Fora do ar'],
@@ -112,7 +113,7 @@ const mapH = (latMax - latMin) * scale;
 // ---------------------------------------------------------------- SVGs (ids sem antialias + overlay branco)
 const pathOf = (s) => s.rings.map((r) => `M${r.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join('L')}Z`).join('');
 const idColor = (g) => `rgb(${GROUPS.indexOf(g)},120,200)`;
-const legendItems = LEGEND.map(([g, text], i) => ({ g, text, x: 606, y: 50 + i * 36 }));
+const legendItems = LEGEND.map(([g, text], i) => ({ g, text, x: 606, y: 46 + i * 32 }));
 
 function svgIds() {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" shape-rendering="crispEdges">

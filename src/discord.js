@@ -60,21 +60,39 @@ const clip = (s, n = 1024) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 const quote = (lines) => lines.map((l) => `> ${l}`).join('\n');
 const statusOf = (state, key, c) => state.components[`${key}:${c.id}`]?.status;
 
+// Autorizador normal = no ar e sem nenhuma UF em laranja/vermelho.
+const isNormal = (state, key, c) => statusOf(state, key, c) === 'ONLINE' && !c.unknown && !c.fail && !c.problem;
+
 function okLine(key, r, state) {
-  const ok = r.components.filter((c) => statusOf(state, key, c) === 'ONLINE');
+  const ok = r.components.filter((c) => isNormal(state, key, c));
   if (key === 'eveo') return ok[0]?.info?.[0] ?? 'DCs SP1/SP2 operacionais';
-  return `${ok.length} autorizador(es) OK: ${ok.map((c) => c.label).join(', ') || '—'}`;
+  return `${ok.length} autorizador(es) normais: ${ok.map((c) => c.label).join(', ') || '—'}`;
 }
 
-// Cor de cada UF no mapa = situação do autorizador que atende a UF.
+// O que ainda está com problema no serviço (para não dizer "normalizado" com estado em vermelho).
+function stillBad(key, r, state) {
+  return {
+    fora: r.components.filter((c) => statusOf(state, key, c) === 'OFFLINE').map((c) => c.id),
+    instavel: r.components.filter((c) => statusOf(state, key, c) === 'ONLINE' && (c.fail || c.problem)).map((c) => c.id),
+  };
+}
+
+function badLines({ fora, instavel }) {
+  const lines = [];
+  if (fora.length) lines.push(`❌ Ainda fora: ${fora.join(', ')}`);
+  if (instavel.length) lines.push(`🟠 Ainda instável: ${instavel.join(', ')}`);
+  return lines;
+}
+
+// Cor de cada UF no mapa: queda confirmada => cinza; senão, a cor da UF calculada como na Tecnospeed.
 export function ufStatuses(key, r, state) {
   const out = {};
   for (const a of MAP_SERVICES[key]) {
     const c = r.components.find((x) => x.id === a.id);
-    let v = 'semdados';
-    if (state.components[`${key}:${a.id}`]?.status === 'OFFLINE') v = 'fora';
-    else if (r.ok && c && !c.unknown) v = c.fail || c.unstable ? 'falha' : c.intermittent ? 'intermitente' : 'ok';
-    for (const uf of a.ufs) out[uf] = v;
+    const offline = state.components[`${key}:${a.id}`]?.status === 'OFFLINE';
+    for (const uf of a.ufs) {
+      out[uf] = offline ? 'fora' : r.ok && c && !c.unknown ? (c.ufColors?.[uf] ?? 'semdados') : 'semdados';
+    }
   }
   return out;
 }
@@ -88,6 +106,7 @@ function withMap(item, key, r, state) {
   if (of('fora').length) lines.push(`**Fora do ar:** ${of('fora').join(', ')}`);
   if (of('falha').length) lines.push(`**Com falha:** ${of('falha').join(', ')}`);
   if (of('intermitente').length) lines.push(`**Intermitente:** ${of('intermitente').join(', ')}`);
+  if (of('lento').length) lines.push(`**Lento:** ${of('lento').join(', ')}`);
   if (of('semdados').length) lines.push(`**Sem dados:** ${of('semdados').join(', ')}`);
   const name = `mapa-${key}.png`;
   item.embed.fields?.push({ name: '🗺️ Estados', value: clip(lines.join('\n') || 'Todos os estados OK.') });
@@ -131,19 +150,19 @@ export function downEmbed(key, r, comps, state, now) {
 }
 
 export function upEmbed(key, r, comps, state, now) {
-  const stillDown = r.components.filter((c) => statusOf(state, key, c) === 'OFFLINE');
+  const bad = stillBad(key, r, state);
+  const partial = bad.fora.length + bad.instavel.length > 0;
   const lines = comps.map((c) => `${c.name} voltou após ${fmtDur(c.downMs)}.`);
-  lines.push(okLine(key, r, state));
-  if (stillDown.length) lines.push(`❌ Ainda fora: ${stillDown.map((c) => c.label).join(', ')}`);
+  lines.push(okLine(key, r, state), ...badLines(bad));
   return withMap(
     {
       mention: false,
       embed: {
-        title: stillDown.length ? '🟡 Recuperação Parcial' : '✅ Serviço Recuperado',
-        description: stillDown.length
-          ? 'Parte do serviço voltou, mas ainda há autorizador fora.'
+        title: partial ? '🟡 Recuperação Parcial' : '✅ Serviço Recuperado',
+        description: partial
+          ? `${comps.map((c) => c.id).join(', ')} voltou, mas o serviço ainda tem estados com problema (veja o mapa).`
           : 'O serviço voltou a operar normalmente.',
-        color: stillDown.length ? COLORS.yellow : COLORS.green,
+        color: partial ? COLORS.yellow : COLORS.green,
         fields: [...changeFields(key, r, comps, 'OFFLINE', 'ONLINE'), { name: '📋 Detalhe', value: clip(lines.join('\n')) }],
         footer: FOOTER,
         timestamp: new Date(now).toISOString(),
@@ -226,15 +245,19 @@ export function intStartEmbed(key, r, comps, state, now) {
 }
 
 export function intEndEmbed(key, r, comps, state, now) {
+  const bad = stillBad(key, r, state);
+  const partial = bad.fora.length + bad.instavel.length > 0;
   const lines = comps.map((c) => `${c.name} ficou instável por ${fmtDur(c.intMs)}.`);
-  lines.push(okLine(key, r, state));
+  lines.push(okLine(key, r, state), ...badLines(bad));
   return withMap(
     {
       mention: false,
       embed: {
-        title: '✅ Instabilidade Normalizada',
-        description: 'O autorizador voltou a operar normalmente.',
-        color: COLORS.green,
+        title: partial ? '🟡 Normalização Parcial' : '✅ Instabilidade Normalizada',
+        description: partial
+          ? `${comps.map((c) => c.id).join(', ')} voltou ao normal, mas o serviço ainda tem estados com problema (veja o mapa).`
+          : 'Todos os estados do serviço voltaram ao normal.',
+        color: partial ? COLORS.yellow : COLORS.green,
         fields: [...changeFields(key, r, comps, 'INTERMITENTE', 'NORMAL'), { name: '📋 Detalhe', value: clip(lines.join('\n')) }],
         footer: FOOTER,
         timestamp: new Date(now).toISOString(),
@@ -308,6 +331,7 @@ export function reportItems(results, state, now, opts = {}) {
 function reportEmbed(results, state, now, { startup = false } = {}) {
   const fields = [];
   let problems = 0;
+  let instabilities = 0;
   for (const key of SERVICE_ORDER) {
     const r = results[key];
     const svc = SERVICES[key];
@@ -319,24 +343,29 @@ function reportEmbed(results, state, now, { startup = false } = {}) {
       lines.push(`Fonte indisponível (${svc.source}): ${r.error}`);
       problems++;
     } else {
+      const unstable = r.components.filter((c) => statusOf(state, key, c) === 'ONLINE' && (c.fail || c.problem));
       if (off.length) {
         head = '🔴 **OFFLINE**';
         problems++;
         for (const c of off) lines.push(`❌ Fora: ${c.id}${c.info?.length ? ` — ${c.info.join('; ')}` : ''}`);
+      } else if (unstable.length) {
+        head = '🟠 **INSTÁVEL**';
+        instabilities++;
       }
       lines.push(okLine(key, r, state));
-      for (const c of r.components) {
-        if (statusOf(state, key, c) === 'ONLINE' && c.unstable) lines.push(`⚠️ Com falha: ${c.id} — ${c.info.join('; ')}`);
-        else if (statusOf(state, key, c) === 'ONLINE' && c.intermittent) lines.push(`〰️ Intermitente: ${c.id} — ${c.info.join('; ')}`);
-        if (c.unknown) lines.push(`❔ Sem dados: ${c.id} — ${c.info.join('; ')}`);
-      }
+      for (const c of unstable) lines.push(`🟠 Instável: ${c.id} — ${c.info.join('; ')}`);
+      for (const c of r.components) if (c.unknown) lines.push(`❔ Sem dados: ${c.id} — ${c.info.join('; ')}`);
     }
     const resp = `Resposta: ${code(fmtMs(r.tempoMs ?? r.ms))} • Verificado: ${code(fmtTime(now))}`;
     fields.push({ name: svc.name, value: clip(`${head}\n${resp}\n${quote(lines)}`) });
   }
   fields.push({ name: '📉 Últimas 24h', value: clip(incidentSummary(state, now)) });
 
-  const summary = problems ? `⚠️ ${problems} serviço(s) com problema.` : '✅ Todos os serviços operacionais.';
+  const summary = problems
+    ? `⚠️ ${problems} serviço(s) com problema.`
+    : instabilities
+      ? `🟠 Todos os serviços no ar, ${instabilities} com instabilidade.`
+      : '✅ Todos os serviços operacionais.';
   const sub = startup
     ? '🚀 *Monitor ativado: rodando 24/7 na nuvem (Cloudflare).*'
     : `📅 *Relatório das ${brtParts(now).hour}h*`;
@@ -345,7 +374,7 @@ function reportEmbed(results, state, now, { startup = false } = {}) {
     embed: {
       title: '📋 Relatório de Status',
       description: `${summary}\n${sub}`,
-      color: problems ? COLORS.yellow : COLORS.green,
+      color: problems ? COLORS.yellow : instabilities ? COLORS.orange : COLORS.green,
       fields,
       footer: FOOTER,
       timestamp: new Date(now).toISOString(),

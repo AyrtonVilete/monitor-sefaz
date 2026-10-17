@@ -83,36 +83,40 @@ function applyResult(state, r, now) {
   return out;
 }
 
-// Intermitência: aviso após N min seguidos, lembrete a cada 30 min, normaliza na primeira leitura OK.
+// Instabilidade (alguma UF em laranja/vermelho): aviso após N min seguidos, lembrete a cada 30 min,
+// normaliza depois de alguns minutos seguidos limpos.
 function intermittentStep(state, key, c, s, now, out) {
-  delete s.hist; // campos da regra antiga (janela de 60 min)
+  const R = INTERMITTENT_ALERT;
+  delete s.hist; // campos de regras antigas
   delete s.cleanN;
-  const closeOpen = () => {
+  const closeOpen = (end) => {
     const open = openIncident(state, key, c.id, 'int');
-    if (open) open.end = now;
+    if (open) open.end = Math.max(open.start, end);
   };
   if (s.status === 'OFFLINE') {
     // a queda tem alerta próprio: encerra a instabilidade sem aviso e recomeça a contagem depois do retorno
-    if (s.intOn) closeOpen();
-    Object.assign(s, { intOn: false, badN: 0 });
+    if (s.intOn) closeOpen(now);
+    Object.assign(s, { intOn: false, badN: 0, okN: 0 });
     return;
   }
-  const bad = !!(c.fail || c.unstable || c.intermittent);
+  const bad = !!(c.fail || c.problem);
   if (!s.intOn) {
     s.badN = bad ? (s.badN ?? 0) + 1 : 0;
-    if (s.badN >= INTERMITTENT_ALERT.startMin) {
+    if (s.badN >= R.startMin) {
       const start = now - (s.badN - 1) * 60000;
-      Object.assign(s, { intOn: true, intSince: start, remindAt: now });
+      Object.assign(s, { intOn: true, intSince: start, remindAt: now, okN: 0 });
       out.intStart.push(c);
       state.incidents.push({ svc: key, id: c.id, kind: 'int', start, end: null });
     }
     return;
   }
-  if (!bad) {
-    out.intEnd.push({ ...c, intMs: now - s.intSince });
-    Object.assign(s, { intOn: false, badN: 0 });
-    closeOpen();
-  } else if (now - s.remindAt >= REMINDER_MS) {
+  s.okN = bad ? 0 : (s.okN ?? 0) + 1;
+  if (s.okN >= R.clearMin) {
+    const end = now - (R.clearMin - 1) * 60000; // primeiro minuto limpo
+    out.intEnd.push({ ...c, intMs: Math.max(60000, end - s.intSince) });
+    Object.assign(s, { intOn: false, badN: 0, okN: 0 });
+    closeOpen(end);
+  } else if (bad && now - s.remindAt >= REMINDER_MS) {
     s.remindAt = now;
     out.intRemind.push({ ...c, intMs: now - s.intSince });
   }
@@ -149,8 +153,7 @@ function summarize(results, state, now) {
         components: r.components.map((c) => ({
           id: c.id,
           status: state.components[`${key}:${c.id}`]?.status ?? 'SEM DADOS',
-          unstable: !!c.unstable,
-          intermittent: !!c.intermittent,
+          problem: !!(c.fail || c.problem),
           unknown: !!c.unknown,
           info: c.info,
         })),
