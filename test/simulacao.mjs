@@ -33,6 +33,7 @@ const realFetch = globalThis.fetch;
 const cache = new Map();
 const discord = [];
 let faults = new Set();
+let simOffset = 0;
 
 async function cached(url, init) {
   if (!cache.has(url)) {
@@ -62,6 +63,12 @@ globalThis.fetch = async (input, init = {}) => {
 
   const c = await cached(url, init);
   let body = c.body;
+  if (url.includes('tecnospeed')) {
+    // relógio simulado: empurra as medições junto com o tempo para elas não ficarem "velhas"
+    const d = JSON.parse(body);
+    d.forEach((p) => (p.datahora = new Date(Date.parse(p.datahora) + simOffset).toISOString()));
+    body = JSON.stringify(d);
+  }
   if (faults.has('nfce_mt') && url.includes('sefaz_nfce_envio_mt')) {
     const d = JSON.parse(body);
     d.slice(-3).forEach((p) => Object.assign(p, { status: 5, tempo: 32140, erro: 'The operation timed out - URL:https://nfce.sefaz.mt.gov.br/nfcews/services/NfeAutorizacao4' }));
@@ -106,13 +113,17 @@ function show(payload) {
 
 const env = { DB, DISCORD_WEBHOOK_URL: 'https://discord.test/webhook', REPORT_HOURS: '18', MENTION: '@everyone' };
 const log = [];
-let minute = 0;
+const BASE = Date.now();
+let minute = 0; // cada execução simulada = 1 minuto real, como o cron
+const simNow = () => BASE + minute * 60000;
 
 async function step(label, f = [], extraEnv = {}, { quiet = false } = {}) {
   faults = new Set(f);
+  simOffset = minute * 60000;
   const before = discord.length;
   const t0 = performance.now();
-  const out = await runMonitor({ ...env, ...extraEnv }, Date.now() + minute++ * 1000);
+  const out = await runMonitor({ ...env, ...extraEnv }, simNow());
+  minute++;
   const ms = performance.now() - t0;
   const msgs = discord.slice(before);
   if (quiet && !msgs.length) return out;
@@ -140,13 +151,16 @@ console.log(`   mapa: GO=${inter.state.lastRun.maps.nfce.GO}`);
 writeFileSync(new URL('./saida/intermitente-nfce.png', import.meta.url), renderMap('nfce', inter.state.lastRun.maps.nfce));
 for (let i = 1; i <= 5; i++) await step(`8.${i} Tecnospeed inacessível`, ['tecnospeed_fora']);
 await step('9. Tecnospeed volta');
-// Instabilidade sustentada: cada execução conta como 1 minuto
-for (let i = 1; i <= 40; i++) await step(`11.${i} GO intermitente (minuto ${i})`, ['nfce_go_1falha'], {}, { quiet: true });
-for (let i = 1; i <= 60; i++) await step(`12.${i} GO normal (minuto ${i})`, [], {}, { quiet: true });
+// Intermitência: aviso no 5º minuto, lembrete 30 min depois, normaliza na primeira leitura OK
+for (let i = 1; i <= 36; i++) await step(`11.${i} GO intermitente (minuto ${i})`, ['nfce_go_1falha'], {}, { quiet: true });
+await step('11.37 GO volta ao normal (normaliza na hora)', [], {}, { quiet: true });
+// Queda longa: alerta na hora (com menção) e lembrete a cada 30 min (sem menção)
+for (let i = 1; i <= 31; i++) await step(`13.${i} MT NFC-e fora (minuto ${i})`, ['nfce_mt'], {}, { quiet: true });
+await step('13.32 MT NFC-e volta (recuperação na hora)', [], {}, { quiet: true });
 const st = JSON.parse(mem.get('state'));
 mem.set('state', JSON.stringify({ ...st, lastReport: null }));
 await step('10. relatório agendado (hora atual configurada como hora do relatório)', [], {
-  REPORT_HOURS: String(brtParts(Date.now()).hour),
+  REPORT_HOURS: String(brtParts(simNow()).hour),
 });
 
 writeFileSync(new URL('./saida-simulacao.json', import.meta.url), JSON.stringify(log, null, 2));

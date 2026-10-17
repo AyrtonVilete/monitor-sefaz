@@ -72,12 +72,13 @@ export const NFCE_RULE = {
   staleMin: 20, // sem medição nova há mais que isso => sem dados (não muda o estado)
 };
 
-// Alerta de intermitência (sem menção): só quando a instabilidade se sustenta, para não alertar toda hora.
+// Alerta de intermitência (sem menção). Normaliza na primeira leitura OK.
 export const INTERMITTENT_ALERT = {
-  windowMin: 60, // olha os últimos 60 min (1 leitura por minuto)
-  minMinutes: 40, // alerta se o autorizador ficou intermitente (ou pior) em pelo menos 40 deles
-  clearMin: 60, // normaliza depois de 60 min seguidos sem intermitência
+  startMin: 5, // avisa quando o autorizador fica intermitente (ou pior) por 5 min seguidos
 };
+
+// Lembrete (sem menção) a cada 30 min enquanto o autorizador continuar fora do ar ou intermitente.
+export const REMINDER_MIN = 30;
 
 // Execuções seguidas (1 por minuto) confirmando a mudança antes de alertar.
 export const CONFIRM_RUNS = { eveo: 1, nfce: 1, nfe: 2 };

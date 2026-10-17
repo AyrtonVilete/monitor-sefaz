@@ -155,9 +155,54 @@ export function upEmbed(key, r, comps, state, now) {
   );
 }
 
-// Instabilidade sustentada: sem menção, com o mapa (laranja nas UFs afetadas).
+// Lembretes: sem menção, com o mapa, a cada REMINDER_MIN enquanto o problema continuar.
+function remindItem(key, r, comps, state, now, { title, description, color, badge, lineOf }) {
+  const lines = comps.map((c) => (c.info?.length ? `${lineOf(c)}\n${quote(c.info)}` : lineOf(c)));
+  return withMap(
+    {
+      mention: false,
+      embed: {
+        title,
+        description,
+        color,
+        fields: [
+          { name: '🖥️ Serviço', value: code(SERVICES[key].name), inline: true },
+          { name: '🔄 Situação', value: badge, inline: true },
+          { name: '⏱️ Tempo de Resposta', value: code(fmtMs(comps[0]?.tempoMs ?? r.ms)), inline: true },
+          { name: '📋 Detalhe', value: clip(lines.join('\n')) },
+        ],
+        footer: FOOTER,
+        timestamp: new Date(now).toISOString(),
+      },
+    },
+    key,
+    r,
+    state,
+  );
+}
+
+export function downRemindEmbed(key, r, comps, state, now) {
+  return remindItem(key, r, comps, state, now, {
+    title: '🔴 Continua Fora do Ar',
+    description: `O serviço segue sem responder há ${fmtDur(comps[0].downMs)}.`,
+    color: COLORS.red,
+    badge: `${BADGE.OFFLINE} há ${fmtDur(comps[0].downMs)}`,
+    lineOf: (c) => `Ainda fora: ${SERVICES[key].short}: ${c.name} (há ${fmtDur(c.downMs)})`,
+  });
+}
+
+export function intRemindEmbed(key, r, comps, state, now) {
+  return remindItem(key, r, comps, state, now, {
+    title: '🟠 Instabilidade Continua',
+    description: `O autorizador segue intermitente há ${fmtDur(comps[0].intMs)}, mas ainda não caiu.`,
+    color: COLORS.orange,
+    badge: `${BADGE.INTERMITENTE} há ${fmtDur(comps[0].intMs)}`,
+    lineOf: (c) => `Ainda intermitente: ${SERVICES[key].short}: ${c.name} (há ${fmtDur(c.intMs)})`,
+  });
+}
+
+// Instabilidade: sem menção, com o mapa (laranja nas UFs afetadas).
 export function intStartEmbed(key, r, comps, state, now) {
-  const R = INTERMITTENT_ALERT;
   const lines = comps.map((c) => {
     const head = `Intermitente: ${SERVICES[key].short}: ${c.name}`;
     return c.info?.length ? `${head}\n${quote(c.info)}` : head;
@@ -167,7 +212,7 @@ export function intStartEmbed(key, r, comps, state, now) {
       mention: false,
       embed: {
         title: '🟠 Instabilidade Detectada',
-        description: `O autorizador está intermitente (alternando falhas, lentidão e envios normais) em ${R.minMinutes} dos últimos ${R.windowMin} min, mas ainda não caiu.`,
+        description: `O autorizador está intermitente (alternando falhas, lentidão e envios normais) há ${INTERMITTENT_ALERT.startMin} min, mas ainda não caiu.`,
         color: COLORS.orange,
         fields: [...changeFields(key, r, comps, 'NORMAL', 'INTERMITENTE'), { name: '📋 Detalhe', value: clip(lines.join('\n')) }],
         footer: FOOTER,
@@ -188,7 +233,7 @@ export function intEndEmbed(key, r, comps, state, now) {
       mention: false,
       embed: {
         title: '✅ Instabilidade Normalizada',
-        description: `O autorizador ficou ${INTERMITTENT_ALERT.clearMin} min seguidos sem intermitência.`,
+        description: 'O autorizador voltou a operar normalmente.',
         color: COLORS.green,
         fields: [...changeFields(key, r, comps, 'INTERMITENTE', 'NORMAL'), { name: '📋 Detalhe', value: clip(lines.join('\n')) }],
         footer: FOOTER,

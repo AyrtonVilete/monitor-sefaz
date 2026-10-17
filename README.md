@@ -4,7 +4,8 @@ Substitui o bot do Discord que dependia de um computador ligado. Roda como **Clo
 
 - 🔴 **Serviço Fora do Ar** (com `@everyone`) quando um autorizador cai
 - ✅ **Serviço Recuperado** quando volta, com o tempo que ficou fora
-- 🟠 **Instabilidade Detectada** (sem menção) quando um autorizador fica intermitente em 40 dos últimos 60 min, e ✅ **Instabilidade Normalizada** depois de 60 min seguidos sem intermitência
+- 🟠 **Instabilidade Detectada** (sem menção) quando um autorizador fica intermitente por 5 min seguidos, e ✅ **Instabilidade Normalizada** assim que ele volta ao normal
+- 🔴 **Continua Fora do Ar** / 🟠 **Instabilidade Continua** (sem menção): lembrete a cada 30 min enquanto o problema durar (`REMINDER_MIN` em `src/config.js`)
 - 📋 **Relatório de Status** todo dia às 18h (horário de Brasília), com as quedas das últimas 24h
 - ⚠️ **Fonte de Dados Indisponível** se uma fonte ficar 5 min sem responder (o monitor não fica "cego" calado)
 - 🗺️ **Mapa do Brasil** anexado nos alertas de SEFAZ e no relatório (um para NFC-e, outro para NF-e), mais o campo "Estados" com as UFs fora e com falha
@@ -14,7 +15,7 @@ Substitui o bot do Discord que dependia de um computador ligado. Roda como **Clo
 | Cor | Significado |
 |---|---|
 | 🟩 Verde | Normal |
-| 🟧 Laranja | Intermitente: alterna envios normais e falhas (NFC-e: ≥ 10% dos envios em 10 min com falha, ou ≥ 30% muito lentos) ou serviço principal lento no portal (NF-e). Vira o aviso 🟠 Instabilidade (sem menção) só se durar 40 dos últimos 60 min (`INTERMITTENT_ALERT` em `src/config.js`) |
+| 🟧 Laranja | Intermitente: alterna envios normais e falhas (NFC-e: ≥ 10% dos envios em 10 min com falha, ou ≥ 30% muito lentos) ou serviço principal lento no portal (NF-e). Vira o aviso 🟠 Instabilidade (sem menção) após 5 min seguidos (`INTERMITTENT_ALERT` em `src/config.js`) |
 | 🟥 Vermelho | Com falha: NFC-e com mais de 25% dos envios falhando (mínimo de 2 falhas), ou algum serviço fora no portal (NF-e), mas o autorizador ainda não caiu |
 | ⬜ Cinza | Fora do ar: o autorizador da UF está OFFLINE (alerta disparado) |
 | ⬛ Cinza escuro | Sem dados da fonte |
