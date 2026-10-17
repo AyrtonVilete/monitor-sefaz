@@ -13,7 +13,8 @@ Substitui o bot do Discord que dependia de um computador ligado. Roda como **Clo
 | Cor | Significado |
 |---|---|
 | 🟩 Verde | Normal |
-| 🟥 Vermelho | Com falha: o autorizador da UF está com erros/timeouts (NFC-e: mais de 25% dos envios em 10 min) ou serviço lento/fora no portal (NF-e), mas ainda não caiu |
+| 🟧 Laranja | Intermitente: alterna envios normais e falhas (NFC-e: ≥ 10% dos envios em 10 min com falha, ou ≥ 30% muito lentos) ou serviço principal lento no portal (NF-e). Só aparece no mapa e no relatório, sem alerta |
+| 🟥 Vermelho | Com falha: NFC-e com mais de 25% dos envios falhando (mínimo de 2 falhas), ou algum serviço fora no portal (NF-e), mas o autorizador ainda não caiu |
 | ⬜ Cinza | Fora do ar: o autorizador da UF está OFFLINE (alerta disparado) |
 | ⬛ Cinza escuro | Sem dados da fonte |
 

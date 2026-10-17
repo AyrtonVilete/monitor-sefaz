@@ -102,12 +102,19 @@ function nfceGroup(a, byUf, now) {
     info.push(`Último erro: ${shortError(fails.reduce((x, y) => (y.t > x.t ? y : x)))}`);
   }
 
+  const slow = win.filter((p) => p.status === 3).length;
+  if (win.length && slow / win.length >= R.slowRatio) info.push(`${slow} de ${win.length} envios muito lentos (> 5s)`);
+
   const fail = enough && fails.length >= R.downMinFails && ratio >= R.downRatio;
+  const unstable = !fail && fails.length >= R.downMinFails && ratio > R.unstableRatio;
+  const intermittent =
+    !fail && !unstable && enough && ((fails.length >= 1 && ratio >= R.intermittentRatio) || slow / win.length >= R.slowRatio);
   return {
     ...base,
     fail,
     ok: enough && ratio <= R.upRatio,
-    unstable: !fail && ratio > R.unstableRatio,
+    unstable,
+    intermittent,
     tempoMs: median(win.map((p) => p.tempo)),
     info,
   };
@@ -209,9 +216,10 @@ export async function checkNfe() {
       if (yellow.length) info.push(`Lento: ${yellow.map((x) => x.title).join(', ')}`);
       if (side.length) info.push(`Outros serviços: ${side.map((x) => `${x.title} ${x.value === 'vermelho' ? '🔴' : '🟡'}`).join(', ')}`);
 
-      // com falha: serviço principal lento, ou qualquer serviço secundário fora (amarelo secundário é só aviso)
-      const unstable = !red.length && (yellow.length > 0 || side.some((x) => x.value === 'vermelho'));
-      return { ...base, fail: red.length > 0, ok: !red.length, unstable, info };
+      // com falha: algum serviço secundário fora; intermitente: serviço principal lento (amarelo secundário é só aviso)
+      const unstable = !red.length && side.some((x) => x.value === 'vermelho');
+      const intermittent = !red.length && !unstable && yellow.length > 0;
+      return { ...base, fail: red.length > 0, ok: !red.length, unstable, intermittent, info };
     });
     return { key: 'nfe', ok: true, ms, verificado, components };
   } catch (e) {

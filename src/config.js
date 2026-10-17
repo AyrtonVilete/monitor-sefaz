@@ -66,7 +66,9 @@ export const NFCE_RULE = {
   downRatio: 0.5, // >= 50% das medições com falha...
   downMinFails: 2, // ...e pelo menos 2 falhas => OFFLINE
   upRatio: 0.3, // <= 30% de falhas => volta a ONLINE (o SVRS oscila entre 4% e 27% em dia normal)
-  unstableRatio: 0.25, // acima disso, sem chegar a OFFLINE, aparece como "com falha" (vermelho no mapa)
+  unstableRatio: 0.25, // > 25% com pelo menos 2 falhas, sem chegar a OFFLINE => "com falha" (vermelho no mapa)
+  intermittentRatio: 0.1, // >= 10% de falhas (1 falha isolada já conta numa UF só) => "intermitente" (laranja)
+  slowRatio: 0.3, // >= 30% dos envios "muito lentos" (status 3, > 5s) também conta como intermitente
   staleMin: 20, // sem medição nova há mais que isso => sem dados (não muda o estado)
 };
 

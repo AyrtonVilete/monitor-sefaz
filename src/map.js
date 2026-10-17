@@ -4,6 +4,7 @@ import { GROUPS, LEVELS, MAPS } from './map-data.js';
 
 export const MAP_COLORS = {
   ok: [0x1f, 0x9d, 0x55], // verde: normal
+  intermitente: [0xdd, 0x6b, 0x10], // laranja: intermitente
   falha: [0xda, 0x37, 0x3c], // vermelho: com falha
   fora: [0x80, 0x84, 0x8e], // cinza: fora do ar
   semdados: [0x4e, 0x50, 0x58], // cinza escuro: sem dados
@@ -31,7 +32,7 @@ function groupColor(group, ufStatus) {
   return MAP_COLORS[ufStatus[group]] ?? MAP_COLORS.semdados;
 }
 
-// ufStatus: { AC: 'ok' | 'falha' | 'fora' | 'semdados', ... }
+// ufStatus: { AC: 'ok' | 'intermitente' | 'falha' | 'fora' | 'semdados', ... }
 export function renderMap(service, ufStatus) {
   const base = (decoded[service] ??= { head: fromB64(MAPS[service].head), tail: fromB64(MAPS[service].tail) });
 

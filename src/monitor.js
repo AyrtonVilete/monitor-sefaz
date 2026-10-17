@@ -97,6 +97,7 @@ function summarize(results, state, now) {
           id: c.id,
           status: state.components[`${key}:${c.id}`]?.status ?? 'SEM DADOS',
           unstable: !!c.unstable,
+          intermittent: !!c.intermittent,
           unknown: !!c.unknown,
           info: c.info,
         })),

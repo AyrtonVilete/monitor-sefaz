@@ -60,7 +60,7 @@ export function ufStatuses(key, r, state) {
     const c = r.components.find((x) => x.id === a.id);
     let v = 'semdados';
     if (state.components[`${key}:${a.id}`]?.status === 'OFFLINE') v = 'fora';
-    else if (r.ok && c && !c.unknown) v = c.fail || c.unstable ? 'falha' : 'ok';
+    else if (r.ok && c && !c.unknown) v = c.fail || c.unstable ? 'falha' : c.intermittent ? 'intermitente' : 'ok';
     for (const uf of a.ufs) out[uf] = v;
   }
   return out;
@@ -74,6 +74,7 @@ function withMap(item, key, r, state) {
   const lines = [];
   if (of('fora').length) lines.push(`**Fora do ar:** ${of('fora').join(', ')}`);
   if (of('falha').length) lines.push(`**Com falha:** ${of('falha').join(', ')}`);
+  if (of('intermitente').length) lines.push(`**Intermitente:** ${of('intermitente').join(', ')}`);
   if (of('semdados').length) lines.push(`**Sem dados:** ${of('semdados').join(', ')}`);
   const name = `mapa-${key}.png`;
   item.embed.fields?.push({ name: '🗺️ Estados', value: clip(lines.join('\n') || 'Todos os estados OK.') });
@@ -216,7 +217,8 @@ function reportEmbed(results, state, now, { startup = false } = {}) {
       }
       lines.push(okLine(key, r, state));
       for (const c of r.components) {
-        if (statusOf(state, key, c) === 'ONLINE' && c.unstable) lines.push(`⚠️ Instável: ${c.id} — ${c.info.join('; ')}`);
+        if (statusOf(state, key, c) === 'ONLINE' && c.unstable) lines.push(`⚠️ Com falha: ${c.id} — ${c.info.join('; ')}`);
+        else if (statusOf(state, key, c) === 'ONLINE' && c.intermittent) lines.push(`〰️ Intermitente: ${c.id} — ${c.info.join('; ')}`);
         if (c.unknown) lines.push(`❔ Sem dados: ${c.id} — ${c.info.join('; ')}`);
       }
     }

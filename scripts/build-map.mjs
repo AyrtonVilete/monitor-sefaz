@@ -17,6 +17,7 @@ const COD = {
 export const UFS = Object.values(COD).sort();
 const LEGEND = [
   ['lg_ok', 'Normal'],
+  ['lg_intermitente', 'Intermitente'],
   ['lg_falha', 'Com falha'],
   ['lg_fora', 'Fora do ar'],
   ['lg_semdados', 'Sem dados'],

@@ -5,6 +5,7 @@
 import { writeFileSync } from 'node:fs';
 import { runMonitor } from '../src/monitor.js';
 import { brtParts } from '../src/discord.js';
+import { renderMap } from '../src/map.js';
 
 // --- D1 em memória
 const mem = new Map();
@@ -71,6 +72,11 @@ globalThis.fetch = async (input, init = {}) => {
     d.slice(-4).forEach((p) => Object.assign(p, { status: 5, tempo: 32150, erro: 'The operation timed out - URL:https://nfce.svrs.rs.gov.br/ws/NfeAutorizacao/NFeAutorizacao4.asmx' }));
     body = JSON.stringify(d);
   }
+  if (faults.has('nfce_go_1falha') && url.includes('sefaz_nfce_envio_go&')) {
+    const d = JSON.parse(body);
+    d.slice(-1).forEach((p) => Object.assign(p, { status: 5, tempo: 1200, erro: 'Service Unavailable (503)' }));
+    body = JSON.stringify(d);
+  }
   if (faults.has('nfe_mt') && url.includes('disponibilidade.aspx')) {
     body = body.replace(/(<td>MT<\/td>[\s\S]*?)bola_verde/i, '$1bola_vermelho');
   }
@@ -128,6 +134,9 @@ await step('6. NF-e: 1ª leitura verde');
 await step('7. NF-e: 2ª leitura verde, confirma retorno');
 await step('7b. SVRS NFC-e cai (19 UFs)', ['nfce_svrs']);
 await step('7c. SVRS NFC-e volta');
+const inter = await step('7d. GO NFC-e com 1 falha isolada (intermitente: só mapa, sem alerta)', ['nfce_go_1falha']);
+console.log(`   mapa: GO=${inter.state.lastRun.maps.nfce.GO}`);
+writeFileSync(new URL('./saida/intermitente-nfce.png', import.meta.url), renderMap('nfce', inter.state.lastRun.maps.nfce));
 for (let i = 1; i <= 5; i++) await step(`8.${i} Tecnospeed inacessível`, ['tecnospeed_fora']);
 await step('9. Tecnospeed volta');
 const st = JSON.parse(mem.get('state'));
