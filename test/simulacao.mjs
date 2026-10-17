@@ -108,13 +108,14 @@ const env = { DB, DISCORD_WEBHOOK_URL: 'https://discord.test/webhook', REPORT_HO
 const log = [];
 let minute = 0;
 
-async function step(label, f = [], extraEnv = {}) {
+async function step(label, f = [], extraEnv = {}, { quiet = false } = {}) {
   faults = new Set(f);
   const before = discord.length;
   const t0 = performance.now();
   const out = await runMonitor({ ...env, ...extraEnv }, Date.now() + minute++ * 1000);
   const ms = performance.now() - t0;
   const msgs = discord.slice(before);
+  if (quiet && !msgs.length) return out;
   console.log(`\n▶ ${label}  →  ${msgs.length} mensagem(ns) | ${ms.toFixed(1)} ms`);
   msgs.forEach(show);
   log.push({ label, faults: f, messages: msgs, ms });
@@ -139,6 +140,9 @@ console.log(`   mapa: GO=${inter.state.lastRun.maps.nfce.GO}`);
 writeFileSync(new URL('./saida/intermitente-nfce.png', import.meta.url), renderMap('nfce', inter.state.lastRun.maps.nfce));
 for (let i = 1; i <= 5; i++) await step(`8.${i} Tecnospeed inacessível`, ['tecnospeed_fora']);
 await step('9. Tecnospeed volta');
+// Instabilidade sustentada: cada execução conta como 1 minuto
+for (let i = 1; i <= 40; i++) await step(`11.${i} GO intermitente (minuto ${i})`, ['nfce_go_1falha'], {}, { quiet: true });
+for (let i = 1; i <= 60; i++) await step(`12.${i} GO normal (minuto ${i})`, [], {}, { quiet: true });
 const st = JSON.parse(mem.get('state'));
 mem.set('state', JSON.stringify({ ...st, lastReport: null }));
 await step('10. relatório agendado (hora atual configurada como hora do relatório)', [], {

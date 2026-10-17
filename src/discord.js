@@ -1,12 +1,25 @@
 // Mensagens do Discord no mesmo formato do bot antigo, mais o envio via webhook.
 
-import { SERVICES, SERVICE_ORDER, MASS_FAILURE_MIN, TZ, NFCE_AUTORIZADORES, NFE_AUTORIZADORES } from './config.js';
+import {
+  SERVICES,
+  SERVICE_ORDER,
+  MASS_FAILURE_MIN,
+  TZ,
+  NFCE_AUTORIZADORES,
+  NFE_AUTORIZADORES,
+  INTERMITTENT_ALERT,
+} from './config.js';
 import { renderMap } from './map.js';
 
-const COLORS = { green: 0x57f287, red: 0xed4245, yellow: 0xfee75c };
+const COLORS = { green: 0x57f287, red: 0xed4245, yellow: 0xfee75c, orange: 0xe67e22 };
 const MAP_SERVICES = { nfce: NFCE_AUTORIZADORES, nfe: NFE_AUTORIZADORES };
 const FOOTER = { text: 'Monitor de Serviços • Cloudflare 24/7' };
-const BADGE = { ONLINE: '✅ `ONLINE`', OFFLINE: '🔴 `OFFLINE`' };
+const BADGE = {
+  ONLINE: '✅ `ONLINE`',
+  OFFLINE: '🔴 `OFFLINE`',
+  NORMAL: '✅ `NORMAL`',
+  INTERMITENTE: '🟠 `INTERMITENTE`',
+};
 
 const timeFmt = new Intl.DateTimeFormat('pt-BR', {
   timeZone: TZ,
@@ -142,6 +155,52 @@ export function upEmbed(key, r, comps, state, now) {
   );
 }
 
+// Instabilidade sustentada: sem menção, com o mapa (laranja nas UFs afetadas).
+export function intStartEmbed(key, r, comps, state, now) {
+  const R = INTERMITTENT_ALERT;
+  const lines = comps.map((c) => {
+    const head = `Intermitente: ${SERVICES[key].short}: ${c.name}`;
+    return c.info?.length ? `${head}\n${quote(c.info)}` : head;
+  });
+  return withMap(
+    {
+      mention: false,
+      embed: {
+        title: '🟠 Instabilidade Detectada',
+        description: `O autorizador está intermitente (alternando falhas, lentidão e envios normais) em ${R.minMinutes} dos últimos ${R.windowMin} min, mas ainda não caiu.`,
+        color: COLORS.orange,
+        fields: [...changeFields(key, r, comps, 'NORMAL', 'INTERMITENTE'), { name: '📋 Detalhe', value: clip(lines.join('\n')) }],
+        footer: FOOTER,
+        timestamp: new Date(now).toISOString(),
+      },
+    },
+    key,
+    r,
+    state,
+  );
+}
+
+export function intEndEmbed(key, r, comps, state, now) {
+  const lines = comps.map((c) => `${c.name} ficou instável por ${fmtDur(c.intMs)}.`);
+  lines.push(okLine(key, r, state));
+  return withMap(
+    {
+      mention: false,
+      embed: {
+        title: '✅ Instabilidade Normalizada',
+        description: `O autorizador ficou ${INTERMITTENT_ALERT.clearMin} min seguidos sem intermitência.`,
+        color: COLORS.green,
+        fields: [...changeFields(key, r, comps, 'INTERMITENTE', 'NORMAL'), { name: '📋 Detalhe', value: clip(lines.join('\n')) }],
+        footer: FOOTER,
+        timestamp: new Date(now).toISOString(),
+      },
+    },
+    key,
+    r,
+    state,
+  );
+}
+
 export function sourceEmbed(key, r, src, now, isDown) {
   const svc = SERVICES[key];
   return {
@@ -169,16 +228,21 @@ function incidentSummary(state, now) {
   const since = now - 24 * 3600e3;
   const groups = new Map();
   for (const i of state.incidents.filter((x) => (x.end ?? now) >= since)) {
-    const k = `${SERVICES[i.svc]?.short ?? i.svc} ${i.id}`;
-    const g = groups.get(k) ?? { n: 0, ms: 0, open: false };
+    const kind = i.kind ?? 'down';
+    const k = `${SERVICES[i.svc]?.short ?? i.svc} ${i.id}|${kind}`;
+    const g = groups.get(k) ?? { kind, n: 0, ms: 0, open: false };
     g.n++;
     g.ms += (i.end ?? now) - Math.max(i.start, since);
     g.open ||= !i.end;
     groups.set(k, g);
   }
-  if (!groups.size) return 'Nenhuma queda registrada.';
+  if (!groups.size) return 'Nenhuma queda ou instabilidade registrada.';
   return [...groups]
-    .map(([k, g]) => `• ${k}: ${g.n} queda(s), ${fmtDur(g.ms)} fora${g.open ? ' (em andamento)' : ''}`)
+    .sort(([, a], [, b]) => (a.kind === b.kind ? 0 : a.kind === 'down' ? -1 : 1))
+    .map(([k, g]) => {
+      const what = g.kind === 'down' ? `🔴 ${g.n} queda(s), ${fmtDur(g.ms)} fora` : `🟠 ${g.n} instabilidade(s), ${fmtDur(g.ms)} instável`;
+      return `• ${k.split('|')[0]}: ${what}${g.open ? ' (em andamento)' : ''}`;
+    })
     .join('\n');
 }
 
@@ -225,7 +289,7 @@ function reportEmbed(results, state, now, { startup = false } = {}) {
     const resp = `Resposta: ${code(fmtMs(r.tempoMs ?? r.ms))} • Verificado: ${code(fmtTime(now))}`;
     fields.push({ name: svc.name, value: clip(`${head}\n${resp}\n${quote(lines)}`) });
   }
-  fields.push({ name: '📉 Quedas nas últimas 24h', value: clip(incidentSummary(state, now)) });
+  fields.push({ name: '📉 Últimas 24h', value: clip(incidentSummary(state, now)) });
 
   const summary = problems ? `⚠️ ${problems} serviço(s) com problema.` : '✅ Todos os serviços operacionais.';
   const sub = startup

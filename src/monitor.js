@@ -1,8 +1,19 @@
 // Uma execução do monitor: consulta as fontes, atualiza o estado no D1 e avisa no Discord quando algo muda.
 
-import { SERVICE_ORDER, CONFIRM_RUNS, SOURCE_ALERT_AFTER } from './config.js';
+import { SERVICE_ORDER, CONFIRM_RUNS, SOURCE_ALERT_AFTER, INTERMITTENT_ALERT } from './config.js';
 import { checkEveo, checkNfce, checkNfe } from './sources.js';
-import { downEmbed, upEmbed, sourceEmbed, reportItems, toPayloads, sendDiscord, brtParts, ufStatuses } from './discord.js';
+import {
+  downEmbed,
+  upEmbed,
+  intStartEmbed,
+  intEndEmbed,
+  sourceEmbed,
+  reportItems,
+  toPayloads,
+  sendDiscord,
+  brtParts,
+  ufStatuses,
+} from './discord.js';
 
 const OUTBOX_MAX = 25;
 const INCIDENT_KEEP_MS = 7 * 24 * 3600e3;
@@ -29,10 +40,12 @@ async function saveState(db, state) {
 
 // ---------------------------------------------------------------- transições
 
+const openIncident = (state, svc, id, kind) =>
+  state.incidents.findLast((i) => i.svc === svc && i.id === id && !i.end && (i.kind ?? 'down') === kind);
+
 function applyResult(state, r, now) {
-  const down = [];
-  const up = [];
-  if (!r.ok) return { down, up }; // fonte fora: mantém o último estado conhecido
+  const out = { down: [], up: [], intStart: [], intEnd: [] };
+  if (!r.ok) return out; // fonte fora: mantém o último estado conhecido
   const confirm = CONFIRM_RUNS[r.key] ?? 1;
 
   for (const c of r.components) {
@@ -44,25 +57,55 @@ function applyResult(state, r, now) {
       continue;
     }
     const target = s.status === 'ONLINE' ? (c.fail ? 'OFFLINE' : null) : c.ok ? 'ONLINE' : null;
-    if (!target) {
-      s.pendN = 0;
-      continue;
+    if (!target) s.pendN = 0;
+    else if (++s.pendN >= confirm) {
+      const downMs = now - s.since;
+      Object.assign(s, { status: target, since: now, pendN: 0 });
+      if (target === 'OFFLINE') {
+        out.down.push(c);
+        state.incidents.push({ svc: r.key, id: c.id, kind: 'down', start: now, end: null });
+      } else {
+        out.up.push({ ...c, downMs });
+        const open = openIncident(state, r.key, c.id, 'down');
+        if (open) open.end = now;
+      }
     }
-    s.pendN = (s.pendN ?? 0) + 1;
-    if (s.pendN < confirm) continue;
-
-    const downMs = now - s.since;
-    Object.assign(s, { status: target, since: now, pendN: 0 });
-    if (target === 'OFFLINE') {
-      down.push(c);
-      state.incidents.push({ svc: r.key, id: c.id, start: now, end: null });
-    } else {
-      up.push({ ...c, downMs });
-      const open = state.incidents.findLast((i) => i.svc === r.key && i.id === c.id && !i.end);
-      if (open) open.end = now;
-    }
+    intermittentStep(state, r.key, c, s, now, out);
   }
-  return { down, up };
+  return out;
+}
+
+// Instabilidade sustentada: histórico de 1 caractere por minuto ('1' = intermitente ou pior).
+function intermittentStep(state, key, c, s, now, out) {
+  const R = INTERMITTENT_ALERT;
+  const closeOpen = (end = now) => {
+    const open = openIncident(state, key, c.id, 'int');
+    if (open) open.end = Math.max(open.start, end);
+  };
+  if (s.status === 'OFFLINE') {
+    // a queda já foi alertada: encerra a instabilidade sem aviso e recomeça a contagem depois do retorno
+    if (s.intOn) closeOpen();
+    Object.assign(s, { hist: '', intOn: false, cleanN: 0 });
+    return;
+  }
+  const bad = !!(c.fail || c.unstable || c.intermittent);
+  s.hist = ((s.hist ?? '') + (bad ? '1' : '0')).slice(-R.windowMin);
+  if (!s.intOn) {
+    if ([...s.hist].filter((x) => x === '1').length >= R.minMinutes) {
+      const start = now - (s.hist.length - 1 - s.hist.indexOf('1')) * 60000; // primeiro minuto instável da janela
+      Object.assign(s, { intOn: true, intSince: start, cleanN: 0 });
+      out.intStart.push(c);
+      state.incidents.push({ svc: key, id: c.id, kind: 'int', start, end: null });
+    }
+    return;
+  }
+  s.cleanN = bad ? 0 : (s.cleanN ?? 0) + 1;
+  if (s.cleanN >= R.clearMin) {
+    const end = now - R.clearMin * 60000; // último minuto instável
+    out.intEnd.push({ ...c, intMs: Math.max(60000, end - s.intSince) });
+    Object.assign(s, { intOn: false, cleanN: 0 });
+    closeOpen(end);
+  }
 }
 
 function sourceHealth(state, r, now) {
@@ -117,11 +160,13 @@ export async function runMonitor(env, now = Date.now()) {
   const items = [];
   for (const key of SERVICE_ORDER) {
     const r = results[key];
-    const { down, up } = applyResult(state, r, now);
+    const { down, up, intStart, intEnd } = applyResult(state, r, now);
     const src = sourceHealth(state, r, now);
     if (firstRun) continue; // primeira execução só registra o estado atual
     if (down.length) items.push(downEmbed(key, r, down, state, now));
     if (up.length) items.push(upEmbed(key, r, up, state, now));
+    if (intStart.length) items.push(intStartEmbed(key, r, intStart, state, now));
+    if (intEnd.length) items.push(intEndEmbed(key, r, intEnd, state, now));
     if (src) items.push(sourceEmbed(key, r, state.sources[key], now, src === 'down'));
   }
 
