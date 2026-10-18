@@ -1,6 +1,13 @@
 // Uma execução do monitor: consulta as fontes, atualiza o estado no D1 e avisa no Discord quando algo muda.
 
-import { SERVICE_ORDER, CONFIRM_RUNS, SOURCE_ALERT_AFTER, INTERMITTENT_ALERT, REMINDER_MIN } from './config.js';
+import {
+  SERVICE_ORDER,
+  CONFIRM_DOWN,
+  CONFIRM_UP,
+  SOURCE_ALERT_AFTER,
+  INTERMITTENT_ALERT,
+  REMINDER_MIN,
+} from './config.js';
 import { checkEveo, checkNfce, checkNfe } from './sources.js';
 import {
   downEmbed,
@@ -11,6 +18,7 @@ import {
   intEndEmbed,
   sourceEmbed,
   reportItems,
+  openingItems,
   toPayloads,
   sendDiscord,
   brtParts,
@@ -50,7 +58,6 @@ const REMINDER_MS = REMINDER_MIN * 60000;
 function applyResult(state, r, now) {
   const out = { down: [], up: [], downRemind: [], intStart: [], intRemind: [], intEnd: [] };
   if (!r.ok) return out; // fonte fora: mantém o último estado conhecido (e pausa os lembretes)
-  const confirm = CONFIRM_RUNS[r.key] ?? 1;
 
   for (const c of r.components) {
     if (c.unknown) continue;
@@ -61,20 +68,26 @@ function applyResult(state, r, now) {
       continue;
     }
     const target = s.status === 'ONLINE' ? (c.fail ? 'OFFLINE' : null) : c.ok ? 'ONLINE' : null;
-    if (!target) s.pendN = 0;
-    else if (++s.pendN >= confirm) {
-      const downMs = now - s.since;
-      Object.assign(s, { status: target, since: now, pendN: 0, remindAt: now });
-      if (target === 'OFFLINE') {
-        out.down.push(c);
-        state.incidents.push({ svc: r.key, id: c.id, kind: 'down', start: now, end: null });
-      } else {
-        out.up.push({ ...c, downMs });
-        const open = openIncident(state, r.key, c.id, 'down');
-        if (open) open.end = now;
+    const confirm = (target === 'OFFLINE' ? CONFIRM_DOWN : CONFIRM_UP)[r.key] ?? 1;
+    if (!target) Object.assign(s, { pendN: 0, pendSince: null }); // piorou de novo: a contagem recomeça sem aviso
+    else {
+      if (!s.pendN) s.pendSince = now; // primeiro minuto da mudança (horário real da queda/retorno)
+      if (++s.pendN >= confirm) {
+        const at = s.pendSince ?? now;
+        const downMs = at - s.since;
+        Object.assign(s, { status: target, since: at, pendN: 0, pendSince: null, remindAt: now });
+        if (target === 'OFFLINE') {
+          out.down.push(c);
+          state.incidents.push({ svc: r.key, id: c.id, kind: 'down', start: at, end: null });
+        } else {
+          out.up.push({ ...c, downMs, backAt: at });
+          const open = openIncident(state, r.key, c.id, 'down');
+          if (open) open.end = at;
+        }
       }
     }
-    if (s.status === 'OFFLINE' && now - (s.remindAt ?? s.since) >= REMINDER_MS) {
+    // lembrete só enquanto continua fora de verdade (não durante os 10 min de confirmação do retorno)
+    if (s.status === 'OFFLINE' && !s.pendN && now - (s.remindAt ?? s.since) >= REMINDER_MS) {
       s.remindAt = now;
       out.downRemind.push({ ...c, downMs: now - s.since });
     }
@@ -113,7 +126,7 @@ function intermittentStep(state, key, c, s, now, out) {
   s.okN = bad ? 0 : (s.okN ?? 0) + 1;
   if (s.okN >= R.clearMin) {
     const end = now - (R.clearMin - 1) * 60000; // primeiro minuto limpo
-    out.intEnd.push({ ...c, intMs: Math.max(60000, end - s.intSince) });
+    out.intEnd.push({ ...c, intMs: Math.max(60000, end - s.intSince), backAt: end });
     Object.assign(s, { intOn: false, badN: 0, okN: 0 });
     closeOpen(end);
   } else if (bad && now - s.remindAt >= REMINDER_MS) {
@@ -164,6 +177,12 @@ function summarize(results, state, now) {
 
 // ---------------------------------------------------------------- execução
 
+// "07:30-22:00" => { start: 450, end: 1320 } em minutos do dia (horário de Brasília); vazio = avisa 24h
+function parseWindow(s) {
+  const m = String(s ?? '').match(/^\s*(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})\s*$/);
+  return m ? { start: +m[1] * 60 + +m[2], end: +m[3] * 60 + +m[4] } : null;
+}
+
 export async function runMonitor(env, now = Date.now()) {
   const state = (await loadState(env.DB)) ?? { components: {}, sources: {}, incidents: [], outbox: [] };
   const firstRun = !state.startedAt;
@@ -185,7 +204,23 @@ export async function runMonitor(env, now = Date.now()) {
     if (src) items.push(sourceEmbed(key, r, state.sources[key], now, src === 'down'));
   }
 
-  const { dateKey, hour } = brtParts(now);
+  // Horário comercial: fora dele o monitor continua registrando tudo, mas não avisa no Discord.
+  const { dateKey, hour, minute } = brtParts(now);
+  const win = parseWindow(env.ALERT_HOURS);
+  const mins = hour * 60 + minute;
+  const inHours = !win || (mins >= win.start && mins < win.end);
+  if (!inHours) items.length = 0;
+
+  // Abertura do expediente: um resumo só se algo aconteceu fora do horário ou ainda está com problema.
+  if (win && inHours && mins - win.start < 30 && state.lastOpening !== dateKey) {
+    state.lastOpening = dateKey;
+    const nightMin = 24 * 60 - (win.end - win.start);
+    const nightStart = now - (mins - win.start + nightMin) * 60000;
+    const opening = firstRun ? null : openingItems(results, state, now, nightStart);
+    if (opening) items.push(...opening);
+  }
+
+  // Relatórios nos horários configurados (independem do horário comercial).
   const reportKey = `${dateKey}T${hour}`;
   const reportHours = String(env.REPORT_HOURS ?? '18')
     .split(',')

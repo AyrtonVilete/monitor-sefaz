@@ -8,6 +8,7 @@ import {
   NFCE_AUTORIZADORES,
   NFE_AUTORIZADORES,
   INTERMITTENT_ALERT,
+  CONFIRM_UP,
 } from './config.js';
 import { renderMap } from './map.js';
 
@@ -34,14 +35,17 @@ const partsFmt = new Intl.DateTimeFormat('en-CA', {
   month: '2-digit',
   day: '2-digit',
   hour: '2-digit',
+  minute: '2-digit',
   hourCycle: 'h23',
 });
+const hmFmt = new Intl.DateTimeFormat('pt-BR', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
 
 export const fmtTime = (ms) => timeFmt.format(ms);
+const fmtHM = (ms) => hmFmt.format(ms);
 
 export function brtParts(ms) {
   const p = Object.fromEntries(partsFmt.formatToParts(ms).map((x) => [x.type, x.value]));
-  return { dateKey: `${p.year}-${p.month}-${p.day}`, hour: Number(p.hour) };
+  return { dateKey: `${p.year}-${p.month}-${p.day}`, hour: Number(p.hour), minute: Number(p.minute) };
 }
 
 export function fmtDur(ms) {
@@ -152,7 +156,8 @@ export function downEmbed(key, r, comps, state, now) {
 export function upEmbed(key, r, comps, state, now) {
   const bad = stillBad(key, r, state);
   const partial = bad.fora.length + bad.instavel.length > 0;
-  const lines = comps.map((c) => `${c.name} voltou após ${fmtDur(c.downMs)}.`);
+  const stable = CONFIRM_UP[key] ?? 1;
+  const lines = comps.map((c) => `${c.name} voltou às ${fmtHM(c.backAt ?? now)}, depois de ${fmtDur(c.downMs)} fora.`);
   lines.push(okLine(key, r, state), ...badLines(bad));
   return withMap(
     {
@@ -160,8 +165,8 @@ export function upEmbed(key, r, comps, state, now) {
       embed: {
         title: partial ? '🟡 Recuperação Parcial' : '✅ Serviço Recuperado',
         description: partial
-          ? `${comps.map((c) => c.id).join(', ')} voltou, mas o serviço ainda tem estados com problema (veja o mapa).`
-          : 'O serviço voltou a operar normalmente.',
+          ? `${comps.map((c) => c.id).join(', ')} voltou e está estável há ${stable} min, mas o serviço ainda tem estados com problema (veja o mapa).`
+          : `O serviço voltou e está estável há ${stable} min.`,
         color: partial ? COLORS.yellow : COLORS.green,
         fields: [...changeFields(key, r, comps, 'OFFLINE', 'ONLINE'), { name: '📋 Detalhe', value: clip(lines.join('\n')) }],
         footer: FOOTER,
@@ -247,7 +252,10 @@ export function intStartEmbed(key, r, comps, state, now) {
 export function intEndEmbed(key, r, comps, state, now) {
   const bad = stillBad(key, r, state);
   const partial = bad.fora.length + bad.instavel.length > 0;
-  const lines = comps.map((c) => `${c.name} ficou instável por ${fmtDur(c.intMs)}.`);
+  const stable = INTERMITTENT_ALERT.clearMin;
+  const lines = comps.map(
+    (c) => `${c.name} normalizou às ${fmtHM(c.backAt ?? now)}, depois de ${fmtDur(c.intMs)} instável.`,
+  );
   lines.push(okLine(key, r, state), ...badLines(bad));
   return withMap(
     {
@@ -255,8 +263,8 @@ export function intEndEmbed(key, r, comps, state, now) {
       embed: {
         title: partial ? '🟡 Normalização Parcial' : '✅ Instabilidade Normalizada',
         description: partial
-          ? `${comps.map((c) => c.id).join(', ')} voltou ao normal, mas o serviço ainda tem estados com problema (veja o mapa).`
-          : 'Todos os estados do serviço voltaram ao normal.',
+          ? `${comps.map((c) => c.id).join(', ')} está estável há ${stable} min, mas o serviço ainda tem estados com problema (veja o mapa).`
+          : `Todos os estados do serviço estão estáveis há ${stable} min.`,
         color: partial ? COLORS.yellow : COLORS.green,
         fields: [...changeFields(key, r, comps, 'INTERMITENTE', 'NORMAL'), { name: '📋 Detalhe', value: clip(lines.join('\n')) }],
         footer: FOOTER,
@@ -292,16 +300,16 @@ export function sourceEmbed(key, r, src, now, isDown) {
   };
 }
 
-function incidentSummary(state, now) {
-  const since = now - 24 * 3600e3;
+function incidentSummary(state, now, since = now - 24 * 3600e3) {
   const groups = new Map();
   for (const i of state.incidents.filter((x) => (x.end ?? now) >= since)) {
     const kind = i.kind ?? 'down';
     const k = `${SERVICES[i.svc]?.short ?? i.svc} ${i.id}|${kind}`;
-    const g = groups.get(k) ?? { kind, n: 0, ms: 0, open: false };
+    const g = groups.get(k) ?? { kind, n: 0, ms: 0, open: false, ranges: [] };
     g.n++;
     g.ms += (i.end ?? now) - Math.max(i.start, since);
     g.open ||= !i.end;
+    g.ranges.push(`${fmtHM(i.start)}–${i.end ? fmtHM(i.end) : 'agora'}`);
     groups.set(k, g);
   }
   if (!groups.size) return 'Nenhuma queda ou instabilidade registrada.';
@@ -309,9 +317,23 @@ function incidentSummary(state, now) {
     .sort(([, a], [, b]) => (a.kind === b.kind ? 0 : a.kind === 'down' ? -1 : 1))
     .map(([k, g]) => {
       const what = g.kind === 'down' ? `🔴 ${g.n} queda(s), ${fmtDur(g.ms)} fora` : `🟠 ${g.n} instabilidade(s), ${fmtDur(g.ms)} instável`;
-      return `• ${k.split('|')[0]}: ${what}${g.open ? ' (em andamento)' : ''}`;
+      const when = g.n <= 2 ? ` (${g.ranges.join(', ')})` : '';
+      return `• ${k.split('|')[0]}: ${what}${when}${g.open ? ' — em andamento' : ''}`;
     })
     .join('\n');
+}
+
+// Abertura do expediente: só manda se algo aconteceu fora do horário ou ainda está com problema.
+export function openingItems(results, state, now, nightStart) {
+  const night = state.incidents.filter((i) => (i.end ?? now) >= nightStart);
+  const comps = SERVICE_ORDER.flatMap((k) => results[k].components.map((c) => state.components[`${k}:${c.id}`] ?? {}));
+  const offline = comps.some((s) => s.status === 'OFFLINE');
+  const unstable = comps.some((s) => s.intOn);
+  const sourceDown = Object.values(state.sources ?? {}).some((s) => s.alerted);
+  if (!night.length && !offline && !unstable && !sourceDown) return null;
+  const items = reportItems(results, state, now, { opening: nightStart });
+  items[0].mention = offline; // queda que começou fora do horário: é o primeiro aviso dela
+  return items;
 }
 
 // Relatório + um embed de mapa por serviço SEFAZ (NFC-e e NF-e).
@@ -328,7 +350,7 @@ export function reportItems(results, state, now, opts = {}) {
   return [report, ...maps];
 }
 
-function reportEmbed(results, state, now, { startup = false } = {}) {
+function reportEmbed(results, state, now, { startup = false, opening = null } = {}) {
   const fields = [];
   let problems = 0;
   let instabilities = 0;
@@ -359,7 +381,11 @@ function reportEmbed(results, state, now, { startup = false } = {}) {
     const resp = `Resposta: ${code(fmtMs(r.tempoMs ?? r.ms))} • Verificado: ${code(fmtTime(now))}`;
     fields.push({ name: svc.name, value: clip(`${head}\n${resp}\n${quote(lines)}`) });
   }
-  fields.push({ name: '📉 Últimas 24h', value: clip(incidentSummary(state, now)) });
+  fields.push(
+    opening
+      ? { name: `🌙 Fora do horário (desde ${fmtHM(opening)})`, value: clip(incidentSummary(state, now, opening)) }
+      : { name: '📉 Últimas 24h', value: clip(incidentSummary(state, now)) },
+  );
 
   const summary = problems
     ? `⚠️ ${problems} serviço(s) com problema.`
@@ -368,11 +394,13 @@ function reportEmbed(results, state, now, { startup = false } = {}) {
       : '✅ Todos os serviços operacionais.';
   const sub = startup
     ? '🚀 *Monitor ativado: rodando 24/7 na nuvem (Cloudflare).*'
-    : `📅 *Relatório das ${brtParts(now).hour}h*`;
+    : opening
+      ? '☀️ *Situação no início do expediente e o que aconteceu fora do horário.*'
+      : `📅 *Relatório das ${brtParts(now).hour}h*`;
   return {
     mention: false,
     embed: {
-      title: '📋 Relatório de Status',
+      title: opening ? '☀️ Abertura do Expediente' : '📋 Relatório de Status',
       description: `${summary}\n${sub}`,
       color: problems ? COLORS.yellow : instabilities ? COLORS.orange : COLORS.green,
       fields,

@@ -1,13 +1,14 @@
 # Monitor SEFAZ / Eveo: 24/7 na nuvem
 
-Substitui o bot do Discord que dependia de um computador ligado. Roda como **Cloudflare Worker** (plano grátis), a cada 1 minuto, e posta no Discord no mesmo formato do bot antigo:
+Substitui o bot do Discord que dependia de um computador ligado. Roda como **Cloudflare Worker** (plano grátis), a cada 1 minuto, 24/7. Os alertas vão para o Discord só no **horário comercial, das 07:30 às 22:00** (`ALERT_HOURS` no `wrangler.toml`), no mesmo formato do bot antigo:
 
 - 🔴 **Serviço Fora do Ar** (com `@everyone`) quando um autorizador cai
-- ✅ **Serviço Recuperado** quando volta, com o tempo que ficou fora
-- 🟠 **Instabilidade Detectada** (sem menção) quando alguma UF do autorizador fica laranja/vermelha por 5 min seguidos, e ✅ **Instabilidade Normalizada** depois de 3 min seguidos limpos
+- ✅ **Serviço Recuperado** só depois de **10 min seguidos OK** (≈ 5 envios da Tecnospeed), com o horário em que voltou. Se cair de novo nesse meio tempo, não sai nada (`CONFIRM_UP` em `src/config.js`)
+- 🟠 **Instabilidade Detectada** (sem menção) quando alguma UF do autorizador fica laranja/vermelha por 5 min seguidos, e ✅ **Instabilidade Normalizada** depois de **10 min seguidos** limpos
 - 🟡 **Recuperação/Normalização Parcial** quando um autorizador volta mas o serviço ainda tem estado com problema (nunca diz "normalizado" com estado em vermelho)
 - 🔴 **Continua Fora do Ar** / 🟠 **Instabilidade Continua** (sem menção): lembrete a cada 30 min enquanto o problema durar (`REMINDER_MIN` em `src/config.js`)
-- 📋 **Relatório de Status** todo dia às 18h (horário de Brasília), com as quedas das últimas 24h
+- ☀️ **Abertura do Expediente** às 07:30, **só se** algo aconteceu fora do horário ou ainda está com problema (com `@everyone` se houver queda em andamento). Noite tranquila = nenhuma mensagem
+- 📋 **Relatório de Status** às **12h, 18h e 22h** (`REPORT_HOURS`), com as quedas e instabilidades das últimas 24h
 - ⚠️ **Fonte de Dados Indisponível** se uma fonte ficar 5 min sem responder (o monitor não fica "cego" calado)
 - 🗺️ **Mapa do Brasil** anexado nos alertas de SEFAZ e no relatório (um para NFC-e, outro para NF-e), mais o campo "Estados" com as UFs fora e com falha
 
@@ -72,22 +73,44 @@ Crie um check grátis em https://healthchecks.io (período 1 min, tolerância 5 
 npx wrangler secret put HEALTHCHECK_URL
 ```
 
+## Mapa web (para quem não usa o Discord)
+
+**https://monitor-sefaz.monitor-sefaz.workers.dev** (o endereço do próprio Worker):
+
+- Mapa 3D do Brasil com a cor de cada estado (mesma conta da Tecnospeed), atualizado a cada minuto
+- Filtros **NF-e / NFC-e / CT-e** (link direto: `/#nfe`, `/#nfce`, `/#cte`)
+- Passe o mouse (ou toque, no celular) em um estado: ele sobe em 3D e mostra o **tempo de resposta em ms** do último envio, a média dos 15 min, falhas, autorizador e último erro
+- Resumo por cor e lista dos estados que pedem atenção
+
+Rotas do Worker:
+
+| Rota | O que é |
+|---|---|
+| `/` | mapa web |
+| `/api/mapa?doc=nfce` | situação de cada UF em JSON (`nfe`, `nfce` ou `cte`), com cache de 1 min no D1 |
+| `/api/status` | último resultado do monitor em JSON (autorizadores, fontes, incidentes, fila do Discord) |
+| `/mapa/nfce.png`, `/mapa/nfe.png` | o mesmo mapa PNG enviado ao Discord |
+| `/geo.json` | geometria dos estados (malha do IBGE) |
+
+Na NF-e, o mapa web usa os envios da Tecnospeed (que têm o tempo em ms por estado); os alertas de queda do Discord continuam usando o portal nacional. O CT-e aparece só no mapa web (sem alertas no Discord).
+
 ## Conferir se está rodando
 
-- Abra a URL do Worker (aparece no fim do `npm run setup`, algo como `https://monitor-sefaz.<sua-conta>.workers.dev`). Ela mostra em JSON a última execução, o status de cada autorizador e se há mensagens pendentes.
+- Abra `/api/status` no endereço do Worker: mostra em JSON a última execução, o status de cada autorizador e se há mensagens pendentes.
 - Logs em tempo real: `npm run logs`
 - Painel: dash.cloudflare.com → Workers & Pages → monitor-sefaz
 
 ## Ajustes
 
 Em `wrangler.toml` (depois rode `npm run deploy`):
-- `REPORT_HOURS = "18"`: horas do relatório, ex.: `"8,12,18"`
+- `REPORT_HOURS = "12,18,22"`: horas dos relatórios
+- `ALERT_HOURS = "07:30-22:00"`: horário comercial dos alertas (`""` = 24h)
 - `MENTION = "@everyone"`: use `""` para não mencionar ninguém, ou `"<@&ID_DO_CARGO>"` para mencionar um cargo
 
 Em `src/config.js`: regra da NFC-e (`NFCE_RULE`), leituras para confirmar (`CONFIRM_RUNS`), mapa de autorizadores.
 
 Para testar mudanças sem publicar:
-- `npm test`: usa dados reais, simula quedas e não envia nada ao Discord (os mapas gerados ficam em `test/saida/`)
+- `npm test`: simula um dia inteiro (quedas, retorno falso, lembretes, instabilidade, noite e abertura) com relógio simulado e confere cada mensagem contra o esperado; não envia nada ao Discord (os mapas ficam em `test/saida/`)
 - `npm run test:discord`: envia 3 mensagens marcadas como 🧪 TESTE (relatório, queda simulada do SVRS e retorno) para o webhook do arquivo `.dev.vars`, sem @everyone
 
 ## Limites e custos

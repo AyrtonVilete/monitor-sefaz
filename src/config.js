@@ -73,14 +73,17 @@ export const NFCE_RULE = {
 // Alerta de instabilidade (sem menção): alguma UF do autorizador em laranja ou vermelho.
 export const INTERMITTENT_ALERT = {
   startMin: 5, // avisa depois de 5 min seguidos instável
-  clearMin: 3, // normaliza depois de 3 min seguidos sem nenhuma UF em laranja/vermelho (evita "normalizar" no meio de uma oscilação)
+  clearMin: 10, // normaliza depois de 10 min seguidos sem nenhuma UF em laranja/vermelho (evita "normalizar" e piorar de novo)
 };
 
 // Lembrete (sem menção) a cada 30 min enquanto o autorizador continuar fora do ar ou intermitente.
 export const REMINDER_MIN = 30;
 
-// Execuções seguidas (1 por minuto) confirmando a mudança antes de alertar.
-export const CONFIRM_RUNS = { eveo: 1, nfce: 1, nfe: 2 };
+// Execuções seguidas (1 por minuto) confirmando a mudança antes de avisar.
+// Queda: a regra da fonte já exige falhas seguidas. Retorno: 10 min seguidos OK (≈ 5 envios da Tecnospeed),
+// para não avisar "voltou" e cair de novo logo depois.
+export const CONFIRM_DOWN = { eveo: 1, nfce: 1, nfe: 2 };
+export const CONFIRM_UP = { eveo: 10, nfce: 10, nfe: 10 };
 
 // Execuções seguidas com a fonte inacessível antes de avisar no Discord.
 export const SOURCE_ALERT_AFTER = 5;

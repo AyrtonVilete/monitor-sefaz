@@ -193,6 +193,22 @@ function buildMap(title) {
   };
 }
 
+// Geometria para o mapa 3D da web (mesma projeção do PNG, origem no canto do mapa).
+const r1 = (n) => Math.round(n * 10) / 10;
+writeFileSync(
+  new URL('../src/web/geo.json', import.meta.url),
+  JSON.stringify({
+    width: MAP.w,
+    height: Math.round(mapH),
+    states: states.map((s) => ({
+      uf: s.uf,
+      rings: s.rings.map((ring) => ring.map(([x, y]) => [r1(x - MAP.x), r1(y - MAP.y)])),
+      label: [r1(s.pole.p[0] - MAP.x), r1(s.pole.p[1] - MAP.y)],
+      ext: EXTERNAL[s.uf] ?? null,
+    })),
+  }),
+);
+
 const maps = { nfce: buildMap('SEFAZ NFC-e'), nfe: buildMap('SEFAZ NF-e') };
 writeFileSync(
   new URL('../src/map-data.js', import.meta.url),

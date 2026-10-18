@@ -1,0 +1,585 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Monitor SEFAZ</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='12' fill='%2322a55b'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #0f1012;
+    --panel: #18191c;
+    --panel-2: #1f2024;
+    --line: #2b2d33;
+    --text: #f2f3f5;
+    --muted: #9ea3ab;
+    --ok: #22a55b;
+    --lento: #d4a52a;
+    --intermitente: #e8781a;
+    --falha: #e5484d;
+    --fora: #8b8f98;
+    --semdados: #4a4d55;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  button { font: inherit; color: inherit; }
+
+  header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding: 14px 20px;
+    border-bottom: 1px solid var(--line); background: linear-gradient(#141518, var(--bg)); }
+  .brand { display: flex; align-items: center; gap: 12px; margin-right: auto; }
+  .brand h1 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: .2px; }
+  .brand p { margin: 0; color: var(--muted); font-size: 12.5px; }
+  .pulse { width: 11px; height: 11px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 0 rgba(34,165,91,.6);
+    animation: pulse 2.4s infinite; flex: none; }
+  @keyframes pulse { 70% { box-shadow: 0 0 0 9px rgba(34,165,91,0); } 100% { box-shadow: 0 0 0 0 rgba(34,165,91,0); } }
+
+  .seg { display: inline-flex; background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 3px; }
+  .seg button { border: 0; background: transparent; padding: 7px 16px; border-radius: 999px; cursor: pointer;
+    color: var(--muted); font-weight: 600; transition: background .15s, color .15s; }
+  .seg button:hover { color: var(--text); }
+  .seg button[aria-selected="true"] { background: #2f3137; color: var(--text); box-shadow: 0 1px 0 rgba(255,255,255,.06) inset; }
+  .seg button:focus-visible, .row:focus-visible { outline: 2px solid #5865f2; outline-offset: 2px; }
+  .updated { color: var(--muted); font-size: 12.5px; min-width: 210px; text-align: right; }
+
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; padding: 16px 20px 20px; }
+  .map-wrap { position: relative; min-height: 640px; height: calc(100vh - 110px); border: 1px solid var(--line);
+    border-radius: var(--radius); overflow: hidden;
+    background: radial-gradient(ellipse at 50% 40%, #1b1d22 0%, #121316 60%, #0e0f11 100%); }
+  #scene { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: manipulation; }
+  #leaders { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  #leaders line { stroke: rgba(255,255,255,.55); stroke-width: 1.2; }
+  #leaders circle { fill: #fff; }
+  #labels { position: absolute; inset: 0; pointer-events: none; }
+  .uf-label { position: absolute; transform: translate(-50%, -50%); font-weight: 700; font-size: var(--fs, 12.5px); letter-spacing: .3px;
+    color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.65), 0 0 6px rgba(0,0,0,.35); pointer-events: auto; cursor: default;
+    padding: 2px 4px; border-radius: 6px; user-select: none; transition: font-size .15s; white-space: nowrap; }
+  .uf-label.ext { background: rgba(15,16,18,.72); border: 1px solid rgba(255,255,255,.12); }
+  .uf-label.active { font-size: calc(var(--fs, 12.5px) + 1.5px); }
+
+  .card { position: absolute; min-width: 230px; max-width: 290px; padding: 12px 14px; border-radius: 12px; pointer-events: none;
+    background: rgba(24,25,28,.92); border: 1px solid rgba(255,255,255,.1); box-shadow: 0 12px 32px rgba(0,0,0,.45);
+    backdrop-filter: blur(6px); transform: translate(-50%, calc(-100% - 16px)); z-index: 3; }
+  .card.below { transform: translate(-50%, 16px); }
+  .card.docked { position: static; transform: none; max-width: none; width: 100%; box-shadow: none; backdrop-filter: none;
+    background: var(--panel); border-color: var(--line); border-radius: var(--radius); }
+  #cardDock:empty { display: none; }
+  .card-head { display: flex; align-items: baseline; gap: 8px; }
+  .card-head b { font-size: 16px; }
+  .card-head span { color: var(--muted); font-size: 12.5px; }
+  .card .st { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; font-weight: 600; font-size: 12.5px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
+  .ms { font-size: 30px; font-weight: 800; letter-spacing: -.5px; margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .ms small { font-size: 14px; font-weight: 600; color: var(--muted); margin-left: 2px; }
+  .card .sub { color: var(--muted); font-size: 12px; margin-top: -2px; }
+  .card dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 10px 0 0; font-size: 12px; }
+  .card dt { color: var(--muted); }
+  .card dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+  .hint { position: absolute; left: 16px; bottom: 14px; color: var(--muted); font-size: 12.5px; background: rgba(15,16,18,.6);
+    padding: 5px 10px; border-radius: 999px; border: 1px solid var(--line); transition: opacity .4s; }
+  .banner { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); background: #3a2a12; color: #ffd8a8;
+    border: 1px solid #6b4a1c; padding: 7px 14px; border-radius: 10px; font-size: 13px; z-index: 4; }
+  .doc-note { position: absolute; right: 14px; bottom: 14px; color: var(--muted); font-size: 12px; max-width: 330px; text-align: right; }
+
+  aside { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; }
+  .panel h2 { margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); font-weight: 700; }
+  .chips { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .chip { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; }
+  .chip b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
+  .chip span { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  .chip.zero { opacity: .45; }
+  #list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: 42vh; overflow: auto; }
+  .row { display: grid; grid-template-columns: 12px 34px 1fr auto; align-items: center; gap: 8px; width: 100%; text-align: left;
+    padding: 7px 8px; border-radius: 9px; border: 0; background: transparent; cursor: pointer; }
+  .row:hover, .row.active { background: var(--panel-2); }
+  .row .uf { font-weight: 700; }
+  .row .nm { color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .val { font-size: 12.5px; text-align: right; font-variant-numeric: tabular-nums; }
+  .row .val small { display: block; color: var(--muted); font-size: 11px; }
+  .empty { color: var(--muted); padding: 6px 2px; }
+  .legend ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+  .legend li { display: grid; grid-template-columns: 12px auto 1fr; gap: 8px; align-items: center; font-size: 12.5px; }
+  .legend li em { font-style: normal; color: var(--muted); font-size: 12px; text-align: right; }
+  .foot { color: var(--muted); font-size: 12px; margin: 2px 4px 0; }
+
+  @media (max-width: 960px) {
+    main { grid-template-columns: 1fr; padding: 12px 16px 16px; }
+    .map-wrap { height: auto; aspect-ratio: 1 / 1.02; min-height: 320px; }
+    .updated { text-align: left; min-width: 0; width: 100%; }
+    #list { max-height: none; }
+    .doc-note { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <span class="pulse" id="pulse"></span>
+    <div>
+      <h1>Monitor SEFAZ</h1>
+      <p>Status por estado, atualizado a cada minuto</p>
+    </div>
+  </div>
+  <nav class="seg" role="tablist" aria-label="Documento fiscal">
+    <button role="tab" data-doc="nfe" aria-selected="false">NF-e</button>
+    <button role="tab" data-doc="nfce" aria-selected="false">NFC-e</button>
+    <button role="tab" data-doc="cte" aria-selected="false">CT-e</button>
+  </nav>
+  <div class="updated" id="updated" aria-live="polite">Carregando…</div>
+</header>
+
+<main>
+  <section class="map-wrap" id="mapWrap" aria-label="Mapa do Brasil com o status de cada estado">
+    <canvas id="scene" aria-hidden="true"></canvas>
+    <svg id="leaders" aria-hidden="true"></svg>
+    <div id="labels"></div>
+    <div id="card" class="card" hidden></div>
+    <div id="hint" class="hint">Passe o mouse sobre um estado</div>
+    <div id="docNote" class="doc-note"></div>
+    <div id="error" class="banner" hidden></div>
+  </section>
+
+  <aside>
+    <div id="cardDock"></div>
+    <div class="panel">
+      <h2>Resumo</h2>
+      <div id="summary" class="chips"></div>
+    </div>
+    <div class="panel">
+      <h2>Estados que pedem atenção</h2>
+      <ul id="list"></ul>
+    </div>
+    <div class="panel legend">
+      <h2>Legenda</h2>
+      <ul>
+        <li><i class="dot" style="background:var(--ok)"></i>Normal<em>média 1</em></li>
+        <li><i class="dot" style="background:var(--lento)"></i>Lento<em>média 2</em></li>
+        <li><i class="dot" style="background:var(--intermitente)"></i>Intermitente<em>média 3</em></li>
+        <li><i class="dot" style="background:var(--falha)"></i>Com falha<em>média 4 a 5</em></li>
+        <li><i class="dot" style="background:var(--fora)"></i>Fora do ar<em>queda confirmada</em></li>
+        <li><i class="dot" style="background:var(--semdados)"></i>Sem dados<em>sem envio recente</em></li>
+      </ul>
+    </div>
+    <p class="foot">A cor de cada estado é a média dos status dos envios de teste da Tecnospeed nos últimos 15 minutos (1 Normal, 2 Lento, 3 Muito lento, 4 Timeout, 5 Erro), a mesma conta do monitor deles. "Fora do ar" é a queda confirmada pelo nosso monitor, a mesma que avisa no Discord.</p>
+  </aside>
+</main>
+
+<noscript><p style="padding:20px">Ative o JavaScript para ver o mapa.</p></noscript>
+
+<script type="importmap">
+  { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+
+const ST = {
+  fora: { label: 'Fora do ar', color: '#8b8f98', sev: 5 },
+  falha: { label: 'Com falha', color: '#e5484d', sev: 4 },
+  intermitente: { label: 'Intermitente', color: '#e8781a', sev: 3 },
+  lento: { label: 'Lento', color: '#d4a52a', sev: 2 },
+  semdados: { label: 'Sem dados', color: '#4a4d55', sev: 1 },
+  ok: { label: 'Normal', color: '#22a55b', sev: 0 },
+};
+const SUMMARY_ORDER = ['ok', 'lento', 'intermitente', 'falha', 'fora', 'semdados'];
+const NAMES = {
+  AC: 'Acre', AL: 'Alagoas', AP: 'Amapá', AM: 'Amazonas', BA: 'Bahia', CE: 'Ceará', DF: 'Distrito Federal',
+  ES: 'Espírito Santo', GO: 'Goiás', MA: 'Maranhão', MT: 'Mato Grosso', MS: 'Mato Grosso do Sul', MG: 'Minas Gerais',
+  PA: 'Pará', PB: 'Paraíba', PR: 'Paraná', PE: 'Pernambuco', PI: 'Piauí', RJ: 'Rio de Janeiro', RN: 'Rio Grande do Norte',
+  RS: 'Rio Grande do Sul', RO: 'Rondônia', RR: 'Roraima', SC: 'Santa Catarina', SP: 'São Paulo', SE: 'Sergipe', TO: 'Tocantins',
+};
+const DOCS = ['nfe', 'nfce', 'cte'];
+const DOC_NOTE = {
+  nfe: 'NF-e: cores pelos envios da Tecnospeed. Os alertas de queda do Discord usam o portal nacional da NF-e.',
+  nfce: '',
+  cte: 'CT-e: cores pelos envios da Tecnospeed (sem alertas no Discord).',
+};
+const SEND_STATUS = { 1: 'Normal', 2: 'Lento', 3: 'Muito lento', 4: 'Timeout', 5: 'Erro' };
+const REFRESH_MS = 60000;
+const DEPTH = 10;
+const LIFT = 38;
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const $ = (id) => document.getElementById(id);
+const wrap = $('mapWrap');
+const fmtInt = (n) => Math.round(n).toLocaleString('pt-BR');
+const fmtTime = (iso) => new Date(iso).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+const fmtAgo = (iso) => {
+  const m = Math.round((Date.now() - Date.parse(iso)) / 60000);
+  return m <= 0 ? 'agora' : m === 1 ? 'há 1 min' : m < 60 ? `há ${m} min` : `há ${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}`;
+};
+const msColor = (ms, st) => (st >= 4 ? ST.falha.color : ms <= 2000 ? ST.ok.color : ms <= 5000 ? ST.lento.color : ST.intermitente.color);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+
+let doc = (() => {
+  const h = location.hash.slice(1);
+  if (DOCS.includes(h)) return h;
+  try { const s = localStorage.getItem('monitor-doc'); if (DOCS.includes(s)) return s; } catch {}
+  return 'nfce';
+})();
+let data = null;
+let hovered = null; // passando o mouse (mapa, rótulo ou lista)
+let pinned = null; // tocado/clicado
+let nextAt = 0;
+const activeUf = () => hovered ?? pinned;
+
+// ------------------------------------------------------------ cena 3D
+const states = new Map();
+let renderer = null;
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(30, 1, 10, 20000);
+let geo;
+let cx = 0;
+let cy = 0;
+
+try {
+  renderer = new THREE.WebGLRenderer({ canvas: $('scene'), antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+} catch {
+  renderer = null;
+}
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x2a2c33, 1.35));
+const sun = new THREE.DirectionalLight(0xffffff, 2.3);
+sun.position.set(-350, -700, 900);
+scene.add(sun);
+
+const labelsEl = $('labels');
+const leadersEl = $('leaders');
+const SVGNS = 'http://www.w3.org/2000/svg';
+
+async function buildScene() {
+  geo = await (await fetch('/geo.json')).json();
+  cx = geo.width / 2;
+  cy = geo.height / 2;
+  const toV = ([x, y]) => new THREE.Vector2(x - cx, cy - y);
+
+  for (const s of geo.states) {
+    const shapes = s.rings.map((r) => new THREE.Shape(r.map(toV)));
+    const geom = new THREE.ExtrudeGeometry(shapes, { depth: DEPTH, bevelEnabled: false });
+    const mat = new THREE.MeshStandardMaterial({ color: ST.semdados.color, roughness: 0.6, metalness: 0.04 });
+    const mesh = new THREE.Mesh(geom, mat);
+    mesh.userData.uf = s.uf;
+    const group = new THREE.Group();
+    group.add(mesh);
+    // contorno branco só na face de cima (fica limpo, como no mapa do Discord)
+    const lineMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6 });
+    for (const r of s.rings) {
+      const pts = r.map(([x, y]) => new THREE.Vector3(x - cx, cy - y, DEPTH + 0.15));
+      group.add(new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts), lineMat));
+    }
+    scene.add(group);
+
+    const el = document.createElement('div');
+    el.className = 'uf-label' + (s.ext ? ' ext' : '');
+    el.textContent = s.uf;
+    el.addEventListener('pointerenter', () => setHover(s.uf));
+    el.addEventListener('pointerleave', () => setHover(null));
+    el.addEventListener('click', () => setPinned(pinned === s.uf ? null : s.uf));
+    labelsEl.appendChild(el);
+
+    let leader = null;
+    if (s.ext) {
+      leader = { line: document.createElementNS(SVGNS, 'line'), dot: document.createElementNS(SVGNS, 'circle') };
+      leader.dot.setAttribute('r', '2.4');
+      leadersEl.append(leader.line, leader.dot);
+    }
+
+    states.set(s.uf, {
+      uf: s.uf, s, group, mesh, el, leader,
+      color: new THREE.Color(ST.semdados.color), target: new THREE.Color(ST.semdados.color), z: 0,
+    });
+  }
+}
+
+const v3 = new THREE.Vector3();
+function toScreen(x, y, z) {
+  v3.set(x - cx, cy - y, z).project(camera);
+  return [((v3.x + 1) / 2) * wrap.clientWidth, ((1 - v3.y) / 2) * wrap.clientHeight];
+}
+
+function placeCamera(d, tilt) {
+  camera.position.set(0, -Math.sin(tilt) * d, Math.cos(tilt) * d);
+  camera.up.set(0, 0, 1);
+  camera.lookAt(0, -geo.height * 0.02, 0);
+  camera.updateProjectionMatrix();
+  camera.updateMatrixWorld();
+}
+
+let laidOut = false;
+function layout() {
+  if (!renderer || !geo) return;
+  const w = wrap.clientWidth;
+  const h = wrap.clientHeight;
+  if (!w || !h) return; // área ainda sem tamanho (aba oculta): o ResizeObserver chama de novo
+  laidOut = true;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  const tilt = THREE.MathUtils.degToRad(34);
+  const pad = w < 600 ? 45 : 90; // espaço à direita para os rótulos externos do Nordeste
+  const corners = [];
+  for (const [x, y] of [[-cx, -cy], [cx + pad, -cy], [cx + pad, cy], [-cx, cy]]) {
+    corners.push(new THREE.Vector3(x, y, 0), new THREE.Vector3(x, y, DEPTH + LIFT));
+  }
+  let lo = 100;
+  let hi = 20000;
+  for (let i = 0; i < 32; i++) {
+    const d = (lo + hi) / 2;
+    placeCamera(d, tilt);
+    const fits = corners.every((c) => {
+      const p = c.clone().project(camera);
+      return Math.abs(p.x) < 0.95 && p.y < 0.86 && p.y > -0.95;
+    });
+    if (fits) hi = d;
+    else lo = d;
+  }
+  placeCamera(hi, tilt);
+  // letra dos rótulos acompanha o tamanho do mapa na tela (19 px no mapa de 640 unidades do Discord)
+  const [ax] = toScreen(0, cy, 0);
+  const [bx] = toScreen(geo.width, cy, 0);
+  fontPx = Math.min(13.5, Math.max(9, (19 * (bx - ax)) / geo.width));
+  labelsEl.style.setProperty('--fs', `${fontPx.toFixed(1)}px`);
+}
+let fontPx = 12.5;
+
+// ------------------------------------------------------------ interação
+const ray = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+function pick(e) {
+  const r = $('scene').getBoundingClientRect();
+  ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  const hit = ray.intersectObjects([...states.values()].map((s) => s.mesh), false)[0];
+  return hit ? hit.object.userData.uf : null;
+}
+$('scene').addEventListener('pointermove', (e) => { if (e.pointerType === 'mouse') setHover(pick(e)); });
+$('scene').addEventListener('pointerleave', () => setHover(null));
+$('scene').addEventListener('click', (e) => { const uf = pick(e); setPinned(uf && uf !== pinned ? uf : null); });
+
+function setHover(uf) {
+  if (hovered === uf) return;
+  hovered = uf;
+  if (uf) $('hint').style.opacity = 0;
+  syncActive();
+}
+function setPinned(uf) {
+  pinned = uf;
+  if (uf) $('hint').style.opacity = 0;
+  syncActive();
+}
+function syncActive() {
+  const a = activeUf();
+  for (const st of states.values()) st.el.classList.toggle('active', st.uf === a);
+  for (const row of document.querySelectorAll('.row')) row.classList.toggle('active', row.dataset.uf === a);
+  renderCard();
+}
+
+// ------------------------------------------------------------ cartão do estado
+function renderCard() {
+  const card = $('card');
+  const uf = activeUf();
+  const d = uf && data?.ufs?.[uf];
+  if (!uf || !d) { card.hidden = true; return; }
+  const st = ST[d.status] ?? ST.semdados;
+  const rows = [];
+  if (d.media != null) rows.push(['Média 15 min', `${d.media.toFixed(2).replace('.', ',')} · ${d.envios} envio(s) · ${d.falhas} falha(s)`]);
+  if (d.mediaMs != null) rows.push(['Tempo médio', `${fmtInt(d.mediaMs)} ms`]);
+  if (d.ultimoStatus) rows.push(['Último envio', SEND_STATUS[d.ultimoStatus] ?? '—']);
+  if (d.autorizador) rows.push(['Autorizador', d.autorizador]);
+  if (d.ultimoErro) rows.push(['Último erro', d.ultimoErro]);
+  card.innerHTML = `
+    <div class="card-head"><b>${uf}</b><span>${esc(NAMES[uf] ?? '')}</span></div>
+    <div class="st"><i class="dot" style="background:${st.color}"></i>${st.label}</div>
+    ${d.ultimoMs != null
+      ? `<div class="ms" style="color:${msColor(d.ultimoMs, d.ultimoStatus)}">${fmtInt(d.ultimoMs)}<small>ms</small></div>
+         <div class="sub">tempo de resposta do último envio · ${fmtAgo(d.ultimoEnvio)}</div>`
+      : '<div class="sub" style="margin-top:6px">Sem envios recentes</div>'}
+    <dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl>`;
+  card.hidden = false;
+  positionCard();
+}
+
+// Tela estreita: o cartão vira um painel logo abaixo do mapa, em vez de flutuar sobre ele.
+const narrow = matchMedia('(max-width: 600px)');
+function dockCard() {
+  const card = $('card');
+  const target = narrow.matches ? $('cardDock') : wrap;
+  if (card.parentElement !== target) target.appendChild(card);
+  card.classList.toggle('docked', narrow.matches);
+}
+narrow.addEventListener('change', dockCard);
+dockCard();
+
+function positionCard() {
+  const card = $('card');
+  const uf = activeUf();
+  const st = uf && states.get(uf);
+  if (narrow.matches) return;
+  if (card.hidden || !st || !renderer) {
+    // sem 3D: cartão fixo no canto
+    if (!card.hidden && !renderer) { card.style.left = '50%'; card.style.top = '50%'; }
+    return;
+  }
+  const [lx, ly] = st.s.label;
+  const [x, y] = toScreen(lx, ly, st.z + DEPTH + 2);
+  const w = card.offsetWidth;
+  const h = card.offsetHeight;
+  const W = wrap.clientWidth;
+  card.style.left = `${Math.min(Math.max(x, w / 2 + 10), W - w / 2 - 10)}px`;
+  const below = y - h - 16 < 10;
+  card.classList.toggle('below', below);
+  card.style.top = `${y}px`;
+}
+
+// ------------------------------------------------------------ loop de animação
+function tick() {
+  requestAnimationFrame(tick);
+  if (!laidOut) return;
+  const a = activeUf();
+  for (const st of states.values()) {
+    const target = st.uf === a ? LIFT : 0;
+    st.z += (target - st.z) * (reduceMotion ? 1 : 0.16);
+    st.group.position.z = st.z;
+    st.color.lerp(st.target, reduceMotion ? 1 : 0.12);
+    const dim = a && st.uf !== a ? 0.62 : 1;
+    st.mesh.material.color.copy(st.color).multiplyScalar(dim);
+    st.mesh.material.emissive.copy(st.color).multiplyScalar(st.uf === a ? 0.22 : 0);
+
+    const [px, py] = st.s.label;
+    const top = st.z + DEPTH + 0.5;
+    if (st.s.ext) {
+      const [dx, dy] = st.s.ext;
+      st.anchor = toScreen(px, py, top);
+      st.at = toScreen(px + dx, py + dy, DEPTH + 0.5);
+    } else {
+      const [x, y] = toScreen(px, py, top);
+      st.el.style.left = `${x}px`;
+      st.el.style.top = `${y}px`;
+    }
+  }
+  placeExternalLabels();
+  renderer.render(scene, camera);
+  positionCard();
+}
+
+// Rótulos externos (estados pequenos do litoral): empilha de cima para baixo para não se sobreporem,
+// qualquer que seja o tamanho do mapa na tela.
+function placeExternalLabels() {
+  const LABEL_GAP = fontPx * 1.75;
+  const ext = [...states.values()].filter((st) => st.s.ext).sort((a, b) => a.at[1] - b.at[1]);
+  let lastY = -Infinity;
+  for (const st of ext) {
+    const isPill = st.uf === 'DF'; // DF fica sobre GO/MG, longe da coluna do litoral
+    const x = st.at[0] + 4;
+    const y = isPill ? st.at[1] : Math.max(st.at[1], lastY + LABEL_GAP);
+    if (!isPill) lastY = y;
+    const [ax, ay] = st.anchor;
+    st.leader.line.setAttribute('x1', ax); st.leader.line.setAttribute('y1', ay);
+    st.leader.line.setAttribute('x2', x - 14); st.leader.line.setAttribute('y2', y);
+    st.leader.dot.setAttribute('cx', ax); st.leader.dot.setAttribute('cy', ay);
+    st.el.style.left = `${x}px`;
+    st.el.style.top = `${y}px`;
+  }
+}
+
+// ------------------------------------------------------------ dados
+function applyData() {
+  const ufs = data?.ufs ?? {};
+  for (const st of states.values()) st.target.set((ST[ufs[st.uf]?.status] ?? ST.semdados).color);
+
+  const counts = Object.fromEntries(SUMMARY_ORDER.map((k) => [k, 0]));
+  for (const d of Object.values(ufs)) counts[d.status in counts ? d.status : 'semdados']++;
+  $('summary').innerHTML = SUMMARY_ORDER.map((k) =>
+    `<div class="chip${counts[k] ? '' : ' zero'}"><b>${counts[k]}</b><span><i class="dot" style="background:${ST[k].color}"></i>${ST[k].label}</span></div>`,
+  ).join('');
+
+  const worst = Object.entries(ufs)
+    .filter(([, d]) => d.status !== 'ok')
+    .sort(([a, x], [b, y]) => (ST[y.status]?.sev ?? 0) - (ST[x.status]?.sev ?? 0) || a.localeCompare(b));
+  $('list').innerHTML = worst.length
+    ? worst.map(([uf, d]) => `
+        <li><button class="row" data-uf="${uf}">
+          <i class="dot" style="background:${(ST[d.status] ?? ST.semdados).color}"></i>
+          <span class="uf">${uf}</span>
+          <span class="nm">${esc(NAMES[uf] ?? '')}</span>
+          <span class="val">${(ST[d.status] ?? ST.semdados).label}<small>${d.ultimoMs != null ? `${fmtInt(d.ultimoMs)} ms` : '—'}</small></span>
+        </button></li>`).join('')
+    : '<li class="empty">Todos os estados normais ✓</li>';
+  for (const row of document.querySelectorAll('.row')) {
+    row.addEventListener('pointerenter', () => setHover(row.dataset.uf));
+    row.addEventListener('pointerleave', () => setHover(null));
+    row.addEventListener('focus', () => setHover(row.dataset.uf));
+    row.addEventListener('blur', () => setHover(null));
+    row.addEventListener('click', () => setPinned(pinned === row.dataset.uf ? null : row.dataset.uf));
+  }
+
+  const bad = counts.fora + counts.falha;
+  $('pulse').style.background = bad ? ST.falha.color : counts.intermitente ? ST.intermitente.color : ST.ok.color;
+  $('docNote').textContent = DOC_NOTE[doc];
+  document.title = `${bad ? '⚠ ' : ''}Monitor SEFAZ · ${{ nfe: 'NF-e', nfce: 'NFC-e', cte: 'CT-e' }[doc]}`;
+  syncActive();
+}
+
+async function load() {
+  const asked = doc;
+  try {
+    const res = await fetch(`/api/mapa?doc=${asked}`, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    if (asked !== doc) return; // trocou de filtro no meio
+    data = json;
+    $('error').hidden = true;
+  } catch {
+    $('error').textContent = 'Não consegui atualizar agora. Tento de novo em 1 minuto.';
+    $('error').hidden = false;
+  }
+  applyData();
+  nextAt = Date.now() + REFRESH_MS;
+}
+
+function selectDoc(d) {
+  doc = d;
+  for (const b of document.querySelectorAll('.seg button')) b.setAttribute('aria-selected', String(b.dataset.doc === d));
+  history.replaceState(null, '', `#${d}`);
+  try { localStorage.setItem('monitor-doc', d); } catch {}
+  data = null;
+  applyData();
+  load();
+}
+for (const b of document.querySelectorAll('.seg button')) b.addEventListener('click', () => selectDoc(b.dataset.doc));
+addEventListener('hashchange', () => {
+  const h = location.hash.slice(1);
+  if (DOCS.includes(h) && h !== doc) selectDoc(h);
+});
+
+setInterval(() => {
+  const left = Math.max(0, Math.round((nextAt - Date.now()) / 1000));
+  $('updated').textContent = data ? `Atualizado às ${fmtTime(data.geradoEm)} · próxima em ${left}s` : 'Carregando…';
+  if (nextAt && Date.now() >= nextAt) load();
+}, 1000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() > nextAt - 30000) load(); });
+
+// ------------------------------------------------------------ início
+if (renderer) {
+  try {
+    await buildScene();
+    layout();
+    new ResizeObserver(layout).observe(wrap);
+    requestAnimationFrame(tick);
+  } catch (e) {
+    renderer = null;
+    $('error').textContent = 'Não consegui desenhar o mapa 3D. A lista ao lado continua funcionando.';
+    $('error').hidden = false;
+  }
+} else {
+  $('hint').textContent = 'Seu navegador não suporta mapa 3D: use a lista ao lado.';
+}
+if (matchMedia('(hover: none)').matches) $('hint').textContent = 'Toque em um estado';
+selectDoc(doc);
+</script>
+</body>
+</html>

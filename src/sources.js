@@ -60,26 +60,27 @@ export async function checkEveo() {
   }
 }
 
-// ---------------------------------------------------------------- NFC-e (Tecnospeed)
+// ---------------------------------------------------------------- Tecnospeed (NF-e, NFC-e, CT-e por UF)
 
-function shortError(p) {
+export function shortError(p) {
   if (p.erro) return p.erro.split(' - URL:')[0].trim().slice(0, 120);
   return p.status === 4 ? 'Timeout (> 30s)' : 'Erro';
 }
 
 // Cor da UF pelo nível da Tecnospeed (média truncada dos status dos últimos 15 min).
-const COLOR_BY_LEVEL = { 1: 'ok', 2: 'lento', 3: 'intermitente', 4: 'falha', 5: 'falha' };
-const isFail = (p) => p.status >= 4;
+export const COLOR_BY_LEVEL = { 1: 'ok', 2: 'lento', 3: 'intermitente', 4: 'falha', 5: 'falha' };
+export const isFail = (p) => p.status >= 4;
 const fmtAvg = (n) => n.toFixed(2).replace('.', ',');
 
-function nfceUf(uf, raw, now) {
+// Situação de uma UF com a mesma conta da Tecnospeed. staleMin: sem envio há mais que isso => sem dados.
+export function tecnoUf(uf, raw, now, { staleMin = NFCE_RULE.staleMin } = {}) {
   const R = NFCE_RULE;
   const probes = (raw ?? [])
     .map((p) => ({ uf, t: Date.parse(p.datahora), status: Number(p.status), tempo: Number(p.tempo), erro: p.erro }))
     .filter((p) => Number.isFinite(p.t) && p.status >= 1)
     .sort((x, y) => x.t - y.t);
   const latest = probes.at(-1);
-  if (!latest || now - latest.t > R.staleMin * 60000) return { uf, unknown: true };
+  if (!latest || now - latest.t > staleMin * 60000) return { uf, unknown: true, latest };
 
   const win = probes.filter((p) => p.t > now - R.windowMin * 60000);
   if (!win.length) win.push(latest);
@@ -89,15 +90,35 @@ function nfceUf(uf, raw, now) {
     avg,
     level: Math.min(5, Math.max(1, Math.trunc(avg))),
     win,
+    latest,
     down: probes.length >= R.downConsecutive && probes.slice(-R.downConsecutive).every(isFail),
     up: probes.length >= R.upConsecutive && probes.slice(-R.upConsecutive).every((p) => !isFail(p)),
   };
 }
 
+// Últimos envios de teste da Tecnospeed de cada UF para um documento (nfe, nfce ou cte).
+export async function fetchTecnoDoc(doc, ufs) {
+  const settled = await Promise.allSettled(
+    ufs.map(async (uf) => {
+      const url = `${TECNOSPEED_URL}?last=true&worker_id=sefaz_${doc}_envio_${uf.toLowerCase()}&filterStatus=all&by=status`;
+      const data = await (await get(url, { accept: 'application/json' })).json();
+      if (!Array.isArray(data)) throw new Error('resposta inesperada');
+      return data;
+    }),
+  );
+  const byUf = {};
+  const errors = [];
+  settled.forEach((s, i) => {
+    if (s.status === 'fulfilled') byUf[ufs[i]] = s.value;
+    else errors.push(`${ufs[i]}: ${s.reason?.message ?? s.reason}`);
+  });
+  return { byUf, errors };
+}
+
 function nfceGroup(a, byUf, now) {
   const R = NFCE_RULE;
   const base = { id: a.id, name: incidentName(a), label: autorizadorLabel(a) };
-  const ufs = a.ufs.map((uf) => nfceUf(uf, byUf[uf], now));
+  const ufs = a.ufs.map((uf) => tecnoUf(uf, byUf[uf], now));
   const known = ufs.filter((u) => !u.unknown);
   if (!known.length) return { ...base, unknown: true, info: ['sem envios recentes na Tecnospeed'] };
 
@@ -118,11 +139,17 @@ function nfceGroup(a, byUf, now) {
     );
     info.push(`Último erro: ${shortError(fails.reduce((x, y) => (y.t > x.t ? y : x)))}`);
   }
-  if (problemUfs.length) {
-    info.push(`Média 15 min (Tecnospeed): ${problemUfs.map((u) => `${u.uf} ${fmtAvg(u.avg)}`).join(' · ')}`);
+  if (problemUfs.length && !fail) {
+    const shown = problemUfs.slice(0, 6).map((u) => `${u.uf} ${fmtAvg(u.avg)}`);
+    if (problemUfs.length > 6) shown.push(`+${problemUfs.length - 6}`);
+    info.push(`Média 15 min (Tecnospeed): ${shown.join(' · ')}`);
   }
   if (down.length && a.ufs.length > 1) {
-    info.push(`${down.length} de ${known.length} UFs com ${R.downConsecutive} falhas seguidas: ${down.map((u) => u.uf).join(', ')}`);
+    info.push(
+      down.length === known.length
+        ? `todas as UFs com ${R.downConsecutive} falhas seguidas`
+        : `${down.length} de ${known.length} UFs com ${R.downConsecutive} falhas seguidas: ${down.map((u) => u.uf).join(', ')}`,
+    );
   }
   const noData = ufs.filter((u) => u.unknown).map((u) => u.uf);
   if (noData.length) info.push(`Sem envios recentes: ${noData.join(', ')}`);
@@ -141,22 +168,8 @@ function nfceGroup(a, byUf, now) {
 export async function checkNfce(now = Date.now()) {
   const t0 = Date.now();
   const ufs = NFCE_AUTORIZADORES.flatMap((a) => a.ufs);
-  const settled = await Promise.allSettled(
-    ufs.map(async (uf) => {
-      const url = `${TECNOSPEED_URL}?last=true&worker_id=sefaz_nfce_envio_${uf.toLowerCase()}&filterStatus=all&by=status`;
-      const data = await (await get(url, { accept: 'application/json' })).json();
-      if (!Array.isArray(data)) throw new Error('resposta inesperada');
-      return data;
-    }),
-  );
+  const { byUf, errors } = await fetchTecnoDoc('nfce', ufs);
   const ms = Date.now() - t0;
-
-  const byUf = {};
-  const errors = [];
-  settled.forEach((s, i) => {
-    if (s.status === 'fulfilled') byUf[ufs[i]] = s.value;
-    else errors.push(`${ufs[i]}: ${s.reason?.message ?? s.reason}`);
-  });
 
   const components = NFCE_AUTORIZADORES.map((a) => nfceGroup(a, byUf, now));
   const known = components.filter((c) => !c.unknown);

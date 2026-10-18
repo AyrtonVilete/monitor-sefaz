@@ -14,8 +14,11 @@ database_name = "monitor-sefaz"
 database_id = "80414862-ec68-4da4-b18b-8024bce4096d"
 
 [vars]
-# Horas (horário de Brasília) do relatório diário, separadas por vírgula. Ex.: "8,18"
-REPORT_HOURS = "18"
+# Horas (horário de Brasília) dos relatórios, separadas por vírgula
+REPORT_HOURS = "12,18,22"
+# Horário comercial (Brasília) em que os alertas vão para o Discord. Fora dele o monitor só registra,
+# e às 07:30 manda a "Abertura do Expediente" se algo aconteceu de noite. Use "" para alertar 24h.
+ALERT_HOURS = "07:30-22:00"
 # Quem é mencionado nas quedas. Use "" para não mencionar ninguém ou "<@&ID_DO_CARGO>" para um cargo.
 MENTION = "@everyone"
 
